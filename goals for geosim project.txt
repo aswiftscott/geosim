@@ -1,0 +1,44 @@
+goals for geosim project:
+
+a command-line interface for generating maps of a simulated planet, and performing climate and geology simulations on them.
+
+
+The following object types should be created:
+
+World:
+- a simulated planet
+- contains basic information about the World that cannot change over time (e.g. whether it is flat or spherical (this will determine how maps of its surface are stored/transformed, and how metrics like distance are defined on its surface), how many pixels/points it will be divided into, simulation timestep size, etc)
+- contains a "Planetology" object
+- contains a "Geology" object
+- contains a "Topography" object
+- contains a "Climate" object
+
+Planetology:
+- contains basic planetary/orbital information like radius, mass, insolation, day length, year length, orbital eccentricity, atmospheric composition, etc
+
+Geology:
+- contains several maps of the planet, e.g. a map indicating the tectonic plate each point on the surface belongs to, a map indicating of orogenies, a map of subduction zones, of large igneous provinces, and possibly more maps of things like rock type)
+
+Topography:
+- an elevation map of the whole planet's surface
+- Topographies can be generated from Geologies
+
+Climate:
+- contains several maps of the planet at multiple points throughout the year, e.g. air pressure, surface temperature, precipitation
+- Climates can be generated from Topographies, and the planetary information about the Planet object
+
+all information in each Planetology, Geology, Topography, and Climate object (for instance a map of surface elevation, day length, etc) will not be saved as simple numbers, but as histories (what value they were at t=0, and each value they changed to at each timestep, if they change at all). It should be possible to take a Climate object, for instance, and produce a snapshot of what all its components were at any given time.
+
+
+How I intend it to be used:
+
+When i start the program, it should open a command line interface (a GUI would be a cool stretch goal, but I don't need it right now)
+
+Automatically create a file system on my computer somewhere containing saved Worlds and other objects. in the CLI, I should be able to select which world I'm currently working on (something like ">>>open <WORLD_NAME>"), and perform any of the following actions:
+- check its status (e.g. what Topology, Geology, Topography, Climate, etc exist in the World object, what actions/simulation have been performed on it already, etc)
+- produce maps and figures of what it looks like at any timestamp (or animations of how it evolves over time)
+- replace or create new objects in it (e.g. build a Climate object out of the existing Planetology and Topography objects)
+- simulate the passing of time, in a variety of ways/levels of detail (for instance, allow the Geology object to evolve over time as tectonic plates move, or allow the Topography object to evolve over time due to erosion). This simulation will add to the history of information in the object.
+
+
+

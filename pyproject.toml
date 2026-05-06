@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "geosim"
+version = "0.1.0"
+description = "Generate and manipulate simulated worlds"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "h5py",
+    "scipy",
+    "matplotlib",
+    "prompt_toolkit",
+]
+
+[project.scripts]
+geosim = "geosim.cli.repl:main"
