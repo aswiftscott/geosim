@@ -11,7 +11,7 @@ from geosim.io import store
 _STYLE = Style.from_dict({"prompt": "ansigreen bold"})
 
 _GLOBAL_COMMANDS = ["new", "open", "list", "help", "exit", "quit"]
-_WORLD_COMMANDS = ["status", "close", "branch", "help", "exit", "quit"]
+_WORLD_COMMANDS = ["status", "planetology", "geology", "topography", "climate", "close", "branch", "help", "exit", "quit"]
 
 _GLOBAL_HELP = """\
 Commands:
@@ -24,6 +24,10 @@ Commands:
 _WORLD_HELP = """\
 Commands (world open):
   status              show world summary
+  planetology         show planetology details
+  geology             show geology details
+  topography          show topography details
+  climate             show climate details
   branch <t> <name>   create a new world branching from time t
   close               close current world without exiting
   help                show this message
@@ -80,6 +84,14 @@ class GeoSimREPL:
                 self._cmd_close()
             elif cmd == "status":
                 self._cmd_status()
+            elif cmd == "planetology":
+                self._cmd_subobject("planetology")
+            elif cmd == "geology":
+                self._cmd_subobject("geology")
+            elif cmd == "topography":
+                self._cmd_subobject("topography")
+            elif cmd == "climate":
+                self._cmd_subobject("climate")
             elif cmd == "branch":
                 self._cmd_branch(args)
             else:
@@ -133,6 +145,16 @@ class GeoSimREPL:
             print("No world is currently open.")
             return
         print(self._world.status())
+
+    def _cmd_subobject(self, name: str) -> None:
+        if not self._world:
+            print("No world is currently open.")
+            return
+        obj = getattr(self._world, name)
+        if obj is None:
+            print(f"This world has no {name} object yet.")
+        else:
+            print(obj.status())
 
     def _cmd_branch(self, args: list[str]) -> None:
         if not self._world:

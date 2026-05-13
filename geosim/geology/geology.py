@@ -19,6 +19,20 @@ class Geology:
         self.large_igneous_provinces: History = History()   # LIP indicator per pixel
         # additional map fields: TBD
 
+    def status(self) -> str:
+        """Return a human-readable summary of all geology map fields."""
+        fields = [
+            "plates",
+            "orogenies",
+            "subduction_zones",
+            "large_igneous_provinces",
+        ]
+        lines = ["Geology:"]
+        for name in fields:
+            h: History = getattr(self, name)
+            lines.append(f"  {name:<28}{h.summary()}")
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         fields = ["plates", "orogenies", "subduction_zones", "large_igneous_provinces"]
         populated = [f for f in fields if len(getattr(self, f)) > 0]

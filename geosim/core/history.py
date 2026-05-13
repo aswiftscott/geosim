@@ -57,5 +57,27 @@ class History:
     def __len__(self) -> int:
         return len(self._times)
 
+    def summary(self) -> str:
+        """Return a compact human-readable description of this history's contents.
+
+        For scalar fields, shows the latest value.
+        For array fields (anything with a .shape attribute), shows shape and snapshot count.
+        """
+        if not self._times:
+            return "not set"
+        n = len(self._times)
+        t_str = (
+            f"t={self._times[0]:.4g}"
+            if n == 1
+            else f"t=[{self._times[0]:.4g} … {self._times[-1]:.4g}]"
+        )
+        latest = self._values[-1]
+        if hasattr(latest, "shape"):
+            label = "snapshot" if n == 1 else "snapshots"
+            return f"{n} {label}, {t_str}, shape={latest.shape}"
+        else:
+            entry_label = "entry" if n == 1 else "entries"
+            return f"{latest}  ({n} {entry_label}, {t_str})"
+
     def __repr__(self) -> str:
         return f"History({len(self)} entries, t=[{self.earliest_time}, {self.latest_time}])"

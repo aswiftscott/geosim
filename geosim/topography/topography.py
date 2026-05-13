@@ -16,6 +16,10 @@ class TopographyTier:
         self.resolution: int = resolution
         self.elevation: History = History()  # metres per pixel
 
+    def status(self) -> str:
+        """Return a human-readable summary of this tier's elevation history."""
+        return f"  Tier (order {self.resolution}):  {self.elevation.summary()} m"
+
     def __repr__(self) -> str:
         return f"TopographyTier(resolution={self.resolution}, {len(self.elevation)} snapshots)"
 
@@ -39,6 +43,15 @@ class Topography:
         if resolution not in self.tiers:
             self.tiers[resolution] = TopographyTier(resolution)
         return self.tiers[resolution]
+
+    def status(self) -> str:
+        """Return a human-readable summary of all topography tiers."""
+        if not self.tiers:
+            return "Topography:\n  no tiers defined"
+        lines = ["Topography:"]
+        for res in sorted(self.tiers):
+            lines.append(self.tiers[res].status())
+        return "\n".join(lines)
 
     def __repr__(self) -> str:
         tier_info = ", ".join(f"order {r}" for r in sorted(self.tiers))

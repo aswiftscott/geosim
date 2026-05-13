@@ -22,6 +22,23 @@ class Planetology:
         self.insolation: History = History()    # W/m^2
         # atmospheric composition and further fields: TBD
 
+    def status(self) -> str:
+        """Return a human-readable summary of all planetology fields."""
+        fields = [
+            ("radius",       "m"),
+            ("mass",         "kg"),
+            ("day_length",   "hr"),
+            ("year_length",  "days"),
+            ("eccentricity", ""),
+            ("insolation",   "W/m²"),
+        ]
+        lines = ["Planetology:"]
+        for name, unit in fields:
+            h: History = getattr(self, name)
+            suffix = f" {unit}" if unit and len(h) > 0 else ""
+            lines.append(f"  {name:<16}{h.summary()}{suffix}")
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         fields = ["radius", "mass", "day_length", "year_length", "eccentricity", "insolation"]
         populated = [f for f in fields if len(getattr(self, f)) > 0]

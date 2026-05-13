@@ -18,6 +18,20 @@ class Climate:
         self.precipitation: History = History()         # mm/yr per pixel
         # additional fields: TBD
 
+    def status(self) -> str:
+        """Return a human-readable summary of all climate map fields."""
+        fields = [
+            ("surface_temperature", "K"),
+            ("air_pressure",        "Pa"),
+            ("precipitation",       "mm/yr"),
+        ]
+        lines = ["Climate:"]
+        for name, unit in fields:
+            h: History = getattr(self, name)
+            suffix = f" {unit}" if unit and len(h) > 0 else ""
+            lines.append(f"  {name:<24}{h.summary()}{suffix}")
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         fields = ["surface_temperature", "air_pressure", "precipitation"]
         populated = [f for f in fields if len(getattr(self, f)) > 0]
