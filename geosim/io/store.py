@@ -62,29 +62,63 @@ def load_world(name: str) -> World:
     return world
 
 
+# ---------------------------------------------------------------------------
+# Generic surface-map History serialization
+# ---------------------------------------------------------------------------
+# Each sub-object (Topography, Geology, Climate, …) stores its fields as
+# History objects containing planet-wide numpy arrays.  The two helpers below
+# handle the common case: a named field whose History entries are all arrays
+# of the same shape.  Sub-object save/load functions enumerate their fields
+# and delegate to these helpers.
+
+def save_map_history(group: h5py.Group, field: str, history) -> None:
+    """Write a History of surface-map arrays to an HDF5 group.
+
+    Creates two datasets inside *group*:
+      ``<field>/times``     — 1-D float64 array of recorded timestamps
+      ``<field>/snapshots`` — 2-D array (n_snapshots × n_pixels), gzip-compressed
+
+    Does nothing if the History is empty.
+    """
+    times = history.times
+    if not times:
+        return
+    fg = group.require_group(field)
+    fg.create_dataset("times", data=np.array(times, dtype=np.float64))
+    snapshots = np.stack([history.get(t) for t in times])
+    fg.create_dataset("snapshots", data=snapshots, compression="gzip")
+
+
+def load_map_history(group: h5py.Group, field: str, history) -> None:
+    """Read a History of surface-map arrays from an HDF5 group.
+
+    Reads the datasets written by :func:`save_map_history` and appends
+    each (time, snapshot) pair into *history* in chronological order.
+    """
+    if field not in group:
+        return
+    fg = group[field]
+    if "times" not in fg or "snapshots" not in fg:
+        return
+    for t, snap in zip(fg["times"][:], fg["snapshots"][:]):
+        history.append(float(t), snap)
+
+
+# ---------------------------------------------------------------------------
+# Topography serialization
+# ---------------------------------------------------------------------------
+
 def _save_topography(f: h5py.File, topo: Topography) -> None:
     tg = f.create_group("topography")
     for res, tier in topo.tiers.items():
         rg = tg.create_group(str(res))
-        times = tier.elevation.times
-        if not times:
-            continue
-        rg.create_dataset("times", data=np.array(times, dtype=np.float64))
-        snapshots = np.stack([tier.elevation.get(t) for t in times])
-        rg.create_dataset("elevation", data=snapshots, compression="gzip")
+        save_map_history(rg, "elevation", tier.elevation)
 
 
 def _load_topography(f: h5py.File) -> Topography:
     topo = Topography()
-    tg = f["topography"]
-    for res_str in tg:
-        rg = tg[res_str]
-        if "times" not in rg or "elevation" not in rg:
-            continue
-        res = int(res_str)
-        tier = topo.get_tier(res)
-        times = rg["times"][:]
-        snapshots = rg["elevation"][:]
-        for t, snap in zip(times, snapshots):
-            tier.elevation.append(float(t), snap)
+    for res_str in f["topography"]:
+        rg = f["topography"][res_str]
+        tier = topo.get_tier(int(res_str))
+        load_map_history(rg, "elevation", tier.elevation)
     return topo
