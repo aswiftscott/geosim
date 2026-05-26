@@ -53,6 +53,7 @@ _TOPOGRAPHY_HELP = """\
 Topography commands:
   topography                   show topography details
   topography new               create a new empty topography
+  topography elevation --help  show elevation sub-command help
   topography elevation load <file>          load elevation from a PNG file
     [--min-elev <m>] [--max-elev <m>]       (defaults: -8000 / 8000 m)
   topography elevation display              display elevation map
@@ -66,6 +67,65 @@ Climate commands:
   climate                      show climate details
   climate new                  create a new empty climate
   climate help                 show this message"""
+
+_TOPOGRAPHY_ELEVATION_HELP = """\
+topography elevation <action> [options]
+
+Actions:
+  load <file>    load elevation from a greyscale PNG (equirectangular projection)
+  display        display the elevation map in a window
+  export [file]  save the elevation map as a greyscale PNG
+
+Run 'topography elevation <action> --help' for full details on each action."""
+
+_TOPOGRAPHY_ELEVATION_LOAD_HELP = """\
+topography elevation load <file> [--min-elev <m>] [--max-elev <m>]
+
+  Load an elevation map from a greyscale PNG file.
+  The PNG must use an equirectangular (plate carrée) projection.
+  Pixel brightness is linearly mapped to elevation:
+    black (0)   → --min-elev
+    white (255) → --max-elev
+
+Arguments:
+  <file>          path to the input PNG (any resolution, any aspect ratio)
+
+Options:
+  --min-elev <m>  elevation value mapped to black  (default: -8000)
+  --max-elev <m>  elevation value mapped to white  (default:  8000)
+
+Example:
+  topography elevation load earth.png --min-elev -11000 --max-elev 8850"""
+
+_TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
+topography elevation display [--time <t>] [--colormap <name>]
+
+  Display the elevation map in an interactive matplotlib window.
+  Requires elevation data to have been loaded first.
+
+Options:
+  --time <t>        snapshot time to display (default: latest)
+  --colormap <name> matplotlib colormap name  (default: terrain)
+
+Example:
+  topography elevation display --colormap viridis"""
+
+_TOPOGRAPHY_ELEVATION_EXPORT_HELP = """\
+topography elevation export [<file>] [--time <t>] [--min-elev <m>] [--max-elev <m>]
+
+  Save the elevation map as a greyscale PNG.
+  If no elevation data exists, a blank mid-grey template is saved instead.
+
+Arguments:
+  <file>          output file path (default: exports/<name>/<name>_elevation.png)
+
+Options:
+  --time <t>      snapshot time to export (default: latest)
+  --min-elev <m>  elevation mapped to black  (default: auto, data minimum)
+  --max-elev <m>  elevation mapped to white  (default: auto, data maximum)
+
+Example:
+  topography elevation export my_map.png --min-elev -8000 --max-elev 8000"""
 
 
 class GeoSimREPL:
@@ -258,6 +318,8 @@ class GeoSimREPL:
             field_args = args[1:]
             if not field_args or field_args[0] == "status":
                 print(self._world.topography.status())
+            elif field_args[0] in ("help", "--help"):
+                print(_TOPOGRAPHY_ELEVATION_HELP)
             elif field_args[0] == "load":
                 self._cmd_topography_elevation_load(field_args[1:])
             elif field_args[0] == "display":
@@ -265,15 +327,15 @@ class GeoSimREPL:
             elif field_args[0] == "export":
                 self._cmd_topography_elevation_export(field_args[1:])
             else:
-                print(f"Unknown topography elevation sub-command: '{field_args[0]}'. Type 'topography help' for usage.")
+                print(f"Unknown topography elevation sub-command: '{field_args[0]}'. Type 'topography elevation --help' for usage.")
             return
 
         print(f"Unknown topography sub-command: '{args[0]}'. Type 'topography help' for usage.")
 
     def _cmd_topography_elevation_load(self, args: list[str]) -> None:
         """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y]"""
-        if not args:
-            print("Usage: topography elevation load <file> [--min-elev <m>] [--max-elev <m>]")
+        if not args or "--help" in args:
+            print(_TOPOGRAPHY_ELEVATION_LOAD_HELP)
             return
 
         path = args[0]
@@ -336,6 +398,9 @@ class GeoSimREPL:
 
     def _cmd_topography_elevation_display(self, args: list[str]) -> None:
         """Handle: topography elevation display [--time T] [--colormap cmap]"""
+        if "--help" in args:
+            print(_TOPOGRAPHY_ELEVATION_DISPLAY_HELP)
+            return
         tier = self._world.topography.tiers.get(self._world.config.base_resolution)
         if tier is None or len(tier.elevation) == 0:
             print("No elevation data at base resolution. Use 'topography elevation load' first.")
@@ -379,6 +444,9 @@ class GeoSimREPL:
 
     def _cmd_topography_elevation_export(self, args: list[str]) -> None:
         """Handle: topography elevation export [<file>] [--time T] [--min-elev M] [--max-elev M]"""
+        if "--help" in args:
+            print(_TOPOGRAPHY_ELEVATION_EXPORT_HELP)
+            return
         out_path_arg: str | None = None
         t: float | None = None
         min_elev: float | None = None
