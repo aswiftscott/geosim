@@ -1,6 +1,5 @@
 # geosim
-
-A command-line tool for generating and simulating planets. Create a **World**, then build up its **Planetology**, **Geology**, **Topography**, and **Climate** — each storing a full history so you can inspect or animate any point in time.
+A command-line tool for creating and simulating the climate and geography of a planet. Create a **World**, then build up its **Planetology**, **Geology**, **Topography**, and **Climate** — each storing a full history so you can inspect or animate any point in time.
 
 ## Installation
 
