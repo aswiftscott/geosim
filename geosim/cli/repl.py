@@ -23,15 +23,17 @@ Commands:
 
 _WORLD_HELP = """\
 Commands (world open):
-  status              show world summary
-  planetology         show planetology details
-  geology             show geology details
-  topography          show topography details
-  climate             show climate details
-  branch <t> <name>   create a new world branching from time t
-  close               close current world without exiting
-  help                show this message
-  exit / quit         exit geosim"""
+  status                                    show world summary
+  planetology                               show planetology details
+  geology                                   show geology details
+  topography                                show topography details
+  topography load elevation <file>          load elevation from a PNG file
+    [--min-elev <m>] [--max-elev <m>]       (defaults: -8000 / 8000 m)
+  climate                                   show climate details
+  branch <t> <name>                         create a new world branching from time t
+  close                                     close current world without exiting
+  help                                      show this message
+  exit / quit                               exit geosim"""
 
 
 class GeoSimREPL:
@@ -89,7 +91,7 @@ class GeoSimREPL:
             elif cmd == "geology":
                 self._cmd_subobject("geology")
             elif cmd == "topography":
-                self._cmd_subobject("topography")
+                self._cmd_topography(args)
             elif cmd == "climate":
                 self._cmd_subobject("climate")
             elif cmd == "branch":
@@ -155,6 +157,89 @@ class GeoSimREPL:
             print(f"This world has no {name} object yet.")
         else:
             print(obj.status())
+
+    def _cmd_topography(self, args: list[str]) -> None:
+        if not self._world:
+            print("No world is currently open.")
+            return
+
+        if not args or args[0] == "status":
+            self._cmd_subobject("topography")
+            return
+
+        if args[0] == "load" and len(args) >= 3 and args[1] == "elevation":
+            self._cmd_topography_load_elevation(args[2:])
+            return
+
+        print(f"Unknown topography sub-command: '{' '.join(args)}'. Type 'help' for usage.")
+
+    def _cmd_topography_load_elevation(self, args: list[str]) -> None:
+        """Handle: topography load elevation <file> [--min-elev X] [--max-elev Y]"""
+        if not args:
+            print("Usage: topography load elevation <file> [--min-elev <m>] [--max-elev <m>]")
+            return
+
+        path = args[0]
+        remaining = args[1:]
+
+        min_elev = -8000.0
+        max_elev = 8000.0
+        i = 0
+        while i < len(remaining):
+            flag = remaining[i]
+            if flag == "--min-elev" and i + 1 < len(remaining):
+                try:
+                    min_elev = float(remaining[i + 1])
+                except ValueError:
+                    print(f"Invalid --min-elev value: {remaining[i + 1]!r}")
+                    return
+                i += 2
+            elif flag == "--max-elev" and i + 1 < len(remaining):
+                try:
+                    max_elev = float(remaining[i + 1])
+                except ValueError:
+                    print(f"Invalid --max-elev value: {remaining[i + 1]!r}")
+                    return
+                i += 2
+            else:
+                print(f"Unknown option: {flag!r}")
+                return
+
+        if min_elev >= max_elev:
+            print("--min-elev must be less than --max-elev.")
+            return
+
+        from geosim.topography.loader import load_elevation_png
+        from geosim.topography.topography import Topography
+
+        print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
+        try:
+            elevation = load_elevation_png(
+                path,
+                grid_type=self._world.config.grid_type,
+                resolution=self._world.config.base_resolution,
+                min_elev=min_elev,
+                max_elev=max_elev,
+            )
+        except FileNotFoundError:
+            print(f"File not found: {path!r}")
+            return
+        except Exception as exc:
+            print(f"Failed to load elevation: {exc}")
+            return
+
+        if self._world.topography is None:
+            self._world.topography = Topography()
+
+        tier = self._world.topography.get_tier(self._world.config.base_resolution)
+        t = self._world.current_time
+        tier.elevation.append(t, elevation)
+
+        store.save_world(self._world)
+        print(
+            f"Loaded elevation map: {elevation.shape[0]:,} pixels, "
+            f"range {elevation.min():.0f} – {elevation.max():.0f} m. World saved."
+        )
 
     def _cmd_branch(self, args: list[str]) -> None:
         if not self._world:

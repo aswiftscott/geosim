@@ -13,6 +13,8 @@ dependencies = [
     "scipy",
     "matplotlib",
     "prompt_toolkit",
+    "healpy; sys_platform != 'win32'",
+    "astropy-healpix",
 ]
 
 [project.scripts]

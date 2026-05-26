@@ -35,6 +35,7 @@ Once a world is open (`geosim [name] >>>`):
 | `planetology` | Show planetology details |
 | `geology` | Show geology details |
 | `topography` | Show topography details |
+| `topography load elevation <file> [--min-elev M] [--max-elev M]` | Load a PNG as an elevation map (equirectangular; default range −8000 to 8000 m) |
 | `climate` | Show climate details |
 | `branch <t> <name>` | Create a new world branching from time `t` |
 | `close` | Close the current world |
