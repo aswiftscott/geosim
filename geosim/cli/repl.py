@@ -103,11 +103,18 @@ topography elevation display [--time <t>] [--colormap <name>]
   Display the elevation map in an interactive matplotlib window.
   Requires elevation data to have been loaded first.
 
+  By default, a custom elevation colormap is used with a hard colour break
+  at sea level (0 m): deep water is dark blue/black, shallow water is light
+  blue, and land transitions from green through brown to white.
+  Specifying --colormap disables the sea-level break and uses a plain
+  matplotlib colormap instead.
+
 Options:
   --time <t>        snapshot time to display (default: latest)
-  --colormap <name> matplotlib colormap name  (default: terrain)
+  --colormap <name> use a plain matplotlib colormap (disables sea-level break)
 
 Example:
+  topography elevation display
   topography elevation display --colormap viridis"""
 
 _TOPOGRAPHY_ELEVATION_EXPORT_HELP = """\
@@ -407,7 +414,7 @@ class GeoSimREPL:
             return
 
         t = tier.elevation.latest_time
-        colormap = "terrain"
+        colormap: str | None = None
         i = 0
         while i < len(args):
             flag = args[i]
@@ -433,13 +440,16 @@ class GeoSimREPL:
 
         from geosim.viz.display import display_surface_map
 
+        # Default: sea-level colormap with a hard break at 0 m.
+        # Override with --colormap to use a plain named colormap instead.
         display_surface_map(
             elevation,
             grid_type=self._world.config.grid_type,
             resolution=self._world.config.base_resolution,
             title=f"{self._world.name} — elevation (t={t:.4g} yr)",
-            colormap=colormap,
+            colormap=colormap or "terrain",
             units="m",
+            sea_level=None if colormap else 0.0,
         )
 
     def _cmd_topography_elevation_export(self, args: list[str]) -> None:
