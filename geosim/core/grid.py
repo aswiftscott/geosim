@@ -11,6 +11,7 @@ This module provides the shared functions for:
   - converting HEALPix pixel indices to (lon, lat) coordinates
   - bilinearly sampling an equirectangular image at arbitrary (lon, lat) points
   - loading a PNG as a surface-map array (used by every object's PNG loader)
+  - converting a surface-map array back to a 2-D equirectangular image (for display)
 """
 from __future__ import annotations
 
@@ -126,3 +127,62 @@ def png_to_surface_map(
         brightness = zoom(png_arr, (resolution / H, resolution / W), order=1)
 
     return min_val + (brightness / 255.0) * (max_val - min_val)
+
+
+# ---------------------------------------------------------------------------
+# Surface-map → 2-D equirectangular image (for display / export)
+# ---------------------------------------------------------------------------
+
+def surface_map_to_equirectangular(
+    arr: np.ndarray,
+    grid_type: str,
+    resolution: int,
+    output_height: int = 360,
+    output_width: int = 720,
+) -> np.ndarray:
+    """Convert a surface-map array to a 2-D equirectangular image.
+
+    This is the inverse of :func:`png_to_surface_map`: it reprojects the
+    internal grid representation back into a regular (lon, lat) grid suitable
+    for display or PNG export.
+
+    For spherical grids (HEALPix), each output pixel's centre (lon, lat) is
+    mapped to the nearest HEALPix pixel using nearest-neighbour lookup — fast
+    and exact (no blurring of discrete geology/plate maps).
+
+    For flat grids the array is simply resized to (output_height, output_width)
+    using bilinear interpolation.
+
+    Args:
+        arr: 1-D HEALPix array (spherical) or 2-D array (flat).
+        grid_type: 'spherical' or 'flat'.
+        resolution: HEALPix order for spherical; grid side-length for flat.
+        output_height: Number of rows in the output image.  Default 360.
+        output_width:  Number of columns in the output image.  Default 720.
+
+    Returns:
+        2-D float64 array of shape (output_height, output_width).
+    """
+    if grid_type == "spherical":
+        from astropy_healpix import HEALPix
+        import astropy.units as u
+
+        nside = 2 ** resolution
+        hp = HEALPix(nside=nside, order="ring")
+
+        # Pixel-centre longitudes and latitudes for the output grid
+        lon_centers = (np.arange(output_width) + 0.5) / output_width * 360.0
+        lat_centers = 90.0 - (np.arange(output_height) + 0.5) / output_height * 180.0
+        lon_grid, lat_grid = np.meshgrid(lon_centers, lat_centers)
+
+        ipix = hp.lonlat_to_healpix(
+            lon_grid.ravel() * u.deg,
+            lat_grid.ravel() * u.deg,
+        )
+        return arr[ipix].reshape(output_height, output_width)
+    else:
+        return zoom(
+            arr.astype(np.float64),
+            (output_height / arr.shape[0], output_width / arr.shape[1]),
+            order=1,
+        )

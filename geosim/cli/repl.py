@@ -23,17 +23,19 @@ Commands:
 
 _WORLD_HELP = """\
 Commands (world open):
-  status                                    show world summary
-  planetology                               show planetology details
-  geology                                   show geology details
-  topography                                show topography details
-  topography load elevation <file>          load elevation from a PNG file
-    [--min-elev <m>] [--max-elev <m>]       (defaults: -8000 / 8000 m)
-  climate                                   show climate details
-  branch <t> <name>                         create a new world branching from time t
-  close                                     close current world without exiting
-  help                                      show this message
-  exit / quit                               exit geosim"""
+  status                                         show world summary
+  planetology                                    show planetology details
+  geology                                        show geology details
+  topography                                     show topography details
+  topography elevation load <file>               load elevation from a PNG file
+    [--min-elev <m>] [--max-elev <m>]            (defaults: -8000 / 8000 m)
+  topography elevation display                   display elevation map
+    [--time <t>] [--colormap <cmap>]             (default: latest snapshot, colormap 'terrain')
+  climate                                        show climate details
+  branch <t> <name>                              create a new world branching from time t
+  close                                          close current world without exiting
+  help                                           show this message
+  exit / quit                                    exit geosim"""
 
 
 class GeoSimREPL:
@@ -167,16 +169,25 @@ class GeoSimREPL:
             self._cmd_subobject("topography")
             return
 
-        if args[0] == "load" and len(args) >= 3 and args[1] == "elevation":
-            self._cmd_topography_load_elevation(args[2:])
+        # Field-first dispatch: topography <field> <action> [options]
+        if args[0] == "elevation":
+            field_args = args[1:]
+            if not field_args or field_args[0] == "status":
+                self._cmd_subobject("topography")
+            elif field_args[0] == "load":
+                self._cmd_topography_elevation_load(field_args[1:])
+            elif field_args[0] == "display":
+                self._cmd_topography_elevation_display(field_args[1:])
+            else:
+                print(f"Unknown topography elevation sub-command: '{field_args[0]}'. Type 'help' for usage.")
             return
 
-        print(f"Unknown topography sub-command: '{' '.join(args)}'. Type 'help' for usage.")
+        print(f"Unknown topography sub-command: '{args[0]}'. Type 'help' for usage.")
 
-    def _cmd_topography_load_elevation(self, args: list[str]) -> None:
-        """Handle: topography load elevation <file> [--min-elev X] [--max-elev Y]"""
+    def _cmd_topography_elevation_load(self, args: list[str]) -> None:
+        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y]"""
         if not args:
-            print("Usage: topography load elevation <file> [--min-elev <m>] [--max-elev <m>]")
+            print("Usage: topography elevation load <file> [--min-elev <m>] [--max-elev <m>]")
             return
 
         path = args[0]
@@ -239,6 +250,53 @@ class GeoSimREPL:
         print(
             f"Loaded elevation map: {elevation.shape[0]:,} pixels, "
             f"range {elevation.min():.0f} – {elevation.max():.0f} m. World saved."
+        )
+
+    def _cmd_topography_elevation_display(self, args: list[str]) -> None:
+        """Handle: topography elevation display [--time T] [--colormap cmap]"""
+        if self._world.topography is None:
+            print("This world has no topography yet. Use 'topography elevation load' first.")
+            return
+
+        tier = self._world.topography.tiers.get(self._world.config.base_resolution)
+        if tier is None or len(tier.elevation) == 0:
+            print("No elevation data at base resolution. Use 'topography elevation load' first.")
+            return
+
+        t = tier.elevation.latest_time
+        colormap = "terrain"
+        i = 0
+        while i < len(args):
+            flag = args[i]
+            if flag == "--time" and i + 1 < len(args):
+                try:
+                    t = float(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --time value: {args[i + 1]!r}")
+                    return
+                i += 2
+            elif flag == "--colormap" and i + 1 < len(args):
+                colormap = args[i + 1]
+                i += 2
+            else:
+                print(f"Unknown option: {flag!r}")
+                return
+
+        try:
+            elevation = tier.elevation.get(t)
+        except ValueError as exc:
+            print(f"No elevation data at t={t}: {exc}")
+            return
+
+        from geosim.viz.display import display_surface_map
+
+        display_surface_map(
+            elevation,
+            grid_type=self._world.config.grid_type,
+            resolution=self._world.config.base_resolution,
+            title=f"{self._world.name} — elevation (t={t:.4g} yr)",
+            colormap=colormap,
+            units="m",
         )
 
     def _cmd_branch(self, args: list[str]) -> None:
