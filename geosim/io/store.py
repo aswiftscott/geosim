@@ -10,11 +10,18 @@ from geosim.core.world import World, WorldConfig
 from geosim.topography.topography import Topography, TopographyTier
 
 WORLDS_DIR = Path.home() / ".geosim" / "worlds"
+EXPORTS_DIR = Path.home() / ".geosim" / "exports"
 
 
 def worlds_dir() -> Path:
     WORLDS_DIR.mkdir(parents=True, exist_ok=True)
     return WORLDS_DIR
+
+
+def exports_dir(world_name: str) -> Path:
+    d = EXPORTS_DIR / world_name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def world_path(name: str) -> Path:

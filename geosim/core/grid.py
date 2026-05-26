@@ -186,3 +186,111 @@ def surface_map_to_equirectangular(
             (output_height / arr.shape[0], output_width / arr.shape[1]),
             order=1,
         )
+
+
+# ---------------------------------------------------------------------------
+# Natural output dimensions for a given grid
+# ---------------------------------------------------------------------------
+
+def natural_equirectangular_size(grid_type: str, resolution: int) -> tuple[int, int]:
+    """Return a natural (height, width) for an equirectangular export image.
+
+    Chosen so that the output pixel density roughly matches the source grid —
+    i.e. the image is large enough to show all the detail in the data without
+    being gratuitously oversized.
+
+    For spherical grids: width = 45 * 2^order, height = width // 2.
+    For flat grids: (resolution, resolution).
+
+    Args:
+        grid_type: 'spherical' or 'flat'.
+        resolution: HEALPix order for spherical; grid side-length for flat.
+
+    Returns:
+        (height, width) tuple of integers.
+    """
+    if grid_type == "spherical":
+        width = 45 * (2 ** resolution)
+        return width // 2, width
+    else:
+        return resolution, resolution
+
+
+# ---------------------------------------------------------------------------
+# Surface-map → greyscale PNG file
+# ---------------------------------------------------------------------------
+
+def surface_map_to_png(
+    arr: np.ndarray,
+    out_path,
+    grid_type: str,
+    resolution: int,
+    min_val: float,
+    max_val: float,
+    output_height: int | None = None,
+    output_width: int | None = None,
+) -> None:
+    """Save a surface-map array as an 8-bit greyscale PNG.
+
+    Reprojects *arr* to equirectangular via
+    :func:`surface_map_to_equirectangular`, linearly scales values from
+    [min_val, max_val] to [0, 255], and writes the result as a greyscale PNG.
+
+    Values below min_val are clamped to 0 (black); values above max_val are
+    clamped to 255 (white).
+
+    If output_height/output_width are not given, uses
+    :func:`natural_equirectangular_size` for the grid.
+
+    Args:
+        arr: 1-D HEALPix array (spherical) or 2-D array (flat).
+        out_path: Destination file path (str or Path); parent dirs must exist.
+        grid_type: 'spherical' or 'flat'.
+        resolution: HEALPix order for spherical; grid side-length for flat.
+        min_val: Data value mapped to brightness 0 (black).
+        max_val: Data value mapped to brightness 255 (white).
+        output_height: Rows in the output PNG; defaults to natural size.
+        output_width: Columns in the output PNG; defaults to natural size.
+    """
+    from PIL import Image
+
+    nat_h, nat_w = natural_equirectangular_size(grid_type, resolution)
+    h = output_height if output_height is not None else nat_h
+    w = output_width if output_width is not None else nat_w
+
+    image = surface_map_to_equirectangular(arr, grid_type, resolution, h, w)
+    brightness = (image - min_val) / (max_val - min_val) * 255.0
+    brightness = np.clip(brightness, 0, 255).astype(np.uint8)
+
+    Image.fromarray(brightness, mode="L").save(out_path)
+
+
+def null_surface_map_png(
+    out_path,
+    grid_type: str,
+    resolution: int,
+    output_height: int | None = None,
+    output_width: int | None = None,
+) -> None:
+    """Save a mid-grey placeholder PNG at the natural size for this grid.
+
+    Used when a field has no data yet but the user wants a blank template to
+    paint on and re-import.  Mid-grey (128) is chosen so that when the image
+    is loaded with default min/max it maps to approximately 0 m elevation.
+
+    Args:
+        out_path: Destination file path (str or Path); parent dirs must exist.
+        grid_type: 'spherical' or 'flat'.
+        resolution: HEALPix order for spherical; grid side-length for flat.
+        output_height: Rows; defaults to natural size.
+        output_width: Columns; defaults to natural size.
+    """
+    from PIL import Image
+
+    nat_h, nat_w = natural_equirectangular_size(grid_type, resolution)
+    h = output_height if output_height is not None else nat_h
+    w = output_width if output_width is not None else nat_w
+
+    arr = np.full((h, w), 128, dtype=np.uint8)
+    Image.fromarray(arr, mode="L").save(out_path)
+

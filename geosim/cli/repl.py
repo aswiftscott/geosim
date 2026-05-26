@@ -5,8 +5,12 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.styles import Style
 
+from geosim.climate.climate import Climate
 from geosim.core.world import World, WorldConfig
+from geosim.geology.geology import Geology
 from geosim.io import store
+from geosim.planetology.planetology import Planetology
+from geosim.topography.topography import Topography
 
 _STYLE = Style.from_dict({"prompt": "ansigreen bold"})
 
@@ -23,19 +27,45 @@ Commands:
 
 _WORLD_HELP = """\
 Commands (world open):
-  status                                         show world summary
-  planetology                                    show planetology details
-  geology                                        show geology details
-  topography                                     show topography details
-  topography elevation load <file>               load elevation from a PNG file
-    [--min-elev <m>] [--max-elev <m>]            (defaults: -8000 / 8000 m)
-  topography elevation display                   display elevation map
-    [--time <t>] [--colormap <cmap>]             (default: latest snapshot, colormap 'terrain')
-  climate                                        show climate details
-  branch <t> <name>                              create a new world branching from time t
-  close                                          close current world without exiting
-  help                                           show this message
-  exit / quit                                    exit geosim"""
+  status                       show world summary
+  planetology [help]           planetology commands
+  geology [help]               geology commands
+  topography [help]            topography commands
+  climate [help]               climate commands
+  branch <t> <name>            create a new world branching from time t
+  close                        close current world without exiting
+  help                         show this message
+  exit / quit                  exit geosim"""
+
+_PLANETOLOGY_HELP = """\
+Planetology commands:
+  planetology                  show planetology details
+  planetology new              create a new empty planetology
+  planetology help             show this message"""
+
+_GEOLOGY_HELP = """\
+Geology commands:
+  geology                      show geology details
+  geology new                  create a new empty geology
+  geology help                 show this message"""
+
+_TOPOGRAPHY_HELP = """\
+Topography commands:
+  topography                   show topography details
+  topography new               create a new empty topography
+  topography elevation load <file>          load elevation from a PNG file
+    [--min-elev <m>] [--max-elev <m>]       (defaults: -8000 / 8000 m)
+  topography elevation display              display elevation map
+    [--time <t>] [--colormap <cmap>]        (default: latest snapshot, colormap 'terrain')
+  topography elevation export [<file>]      export elevation map as greyscale PNG
+    [--time <t>] [--min-elev <m>] [--max-elev <m>]  (defaults: latest snapshot, auto-scaled)
+  topography help              show this message"""
+
+_CLIMATE_HELP = """\
+Climate commands:
+  climate                      show climate details
+  climate new                  create a new empty climate
+  climate help                 show this message"""
 
 
 class GeoSimREPL:
@@ -89,13 +119,13 @@ class GeoSimREPL:
             elif cmd == "status":
                 self._cmd_status()
             elif cmd == "planetology":
-                self._cmd_subobject("planetology")
+                self._cmd_object("planetology", Planetology, args, _PLANETOLOGY_HELP)
             elif cmd == "geology":
-                self._cmd_subobject("geology")
+                self._cmd_object("geology", Geology, args, _GEOLOGY_HELP)
             elif cmd == "topography":
                 self._cmd_topography(args)
             elif cmd == "climate":
-                self._cmd_subobject("climate")
+                self._cmd_object("climate", Climate, args, _CLIMATE_HELP)
             elif cmd == "branch":
                 self._cmd_branch(args)
             else:
@@ -151,14 +181,50 @@ class GeoSimREPL:
         print(self._world.status())
 
     def _cmd_subobject(self, name: str) -> None:
+        """Show status for a top-level object (used by _cmd_object and _cmd_topography)."""
         if not self._world:
             print("No world is currently open.")
             return
         obj = getattr(self._world, name)
         if obj is None:
-            print(f"This world has no {name} object yet.")
+            print(f"This world has no {name} yet. Use '{name} new' to create one.")
         else:
             print(obj.status())
+
+    def _cmd_object(self, attr: str, cls, args: list[str], help_text: str) -> None:
+        """Generic dispatcher for top-level objects: handles 'new', 'help', and status.
+
+        Objects without field sub-commands yet (Planetology, Geology, Climate)
+        use this dispatcher.  When they gain sub-commands they will get their
+        own method like _cmd_topography.
+        """
+        if not self._world:
+            print("No world is currently open.")
+            return
+
+        if not args or args[0] == "status":
+            self._cmd_subobject(attr)
+            return
+
+        if args[0] == "help":
+            print(help_text)
+            return
+
+        if args[0] == "new":
+            if getattr(self._world, attr) is not None:
+                print(f"This world already has a {attr}.")
+                return
+            setattr(self._world, attr, cls())
+            store.save_world(self._world)
+            print(f"Created new {attr}.")
+            return
+
+        # Any other sub-command requires the object to exist
+        if getattr(self._world, attr) is None:
+            print(f"No {attr} yet. Run '{attr} new' first.")
+            return
+
+        print(f"Unknown {attr} sub-command: '{args[0]}'. Type '{attr} help' for usage.")
 
     def _cmd_topography(self, args: list[str]) -> None:
         if not self._world:
@@ -169,20 +235,40 @@ class GeoSimREPL:
             self._cmd_subobject("topography")
             return
 
+        if args[0] == "help":
+            print(_TOPOGRAPHY_HELP)
+            return
+
+        if args[0] == "new":
+            if self._world.topography is not None:
+                print("This world already has a topography.")
+                return
+            self._world.topography = Topography()
+            store.save_world(self._world)
+            print("Created new topography.")
+            return
+
+        # All field sub-commands require topography to exist
+        if self._world.topography is None:
+            print("No topography yet. Run 'topography new' first.")
+            return
+
         # Field-first dispatch: topography <field> <action> [options]
         if args[0] == "elevation":
             field_args = args[1:]
             if not field_args or field_args[0] == "status":
-                self._cmd_subobject("topography")
+                print(self._world.topography.status())
             elif field_args[0] == "load":
                 self._cmd_topography_elevation_load(field_args[1:])
             elif field_args[0] == "display":
                 self._cmd_topography_elevation_display(field_args[1:])
+            elif field_args[0] == "export":
+                self._cmd_topography_elevation_export(field_args[1:])
             else:
-                print(f"Unknown topography elevation sub-command: '{field_args[0]}'. Type 'help' for usage.")
+                print(f"Unknown topography elevation sub-command: '{field_args[0]}'. Type 'topography help' for usage.")
             return
 
-        print(f"Unknown topography sub-command: '{args[0]}'. Type 'help' for usage.")
+        print(f"Unknown topography sub-command: '{args[0]}'. Type 'topography help' for usage.")
 
     def _cmd_topography_elevation_load(self, args: list[str]) -> None:
         """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y]"""
@@ -221,7 +307,6 @@ class GeoSimREPL:
             return
 
         from geosim.topography.loader import load_elevation_png
-        from geosim.topography.topography import Topography
 
         print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
         try:
@@ -239,9 +324,6 @@ class GeoSimREPL:
             print(f"Failed to load elevation: {exc}")
             return
 
-        if self._world.topography is None:
-            self._world.topography = Topography()
-
         tier = self._world.topography.get_tier(self._world.config.base_resolution)
         t = self._world.current_time
         tier.elevation.append(t, elevation)
@@ -254,10 +336,6 @@ class GeoSimREPL:
 
     def _cmd_topography_elevation_display(self, args: list[str]) -> None:
         """Handle: topography elevation display [--time T] [--colormap cmap]"""
-        if self._world.topography is None:
-            print("This world has no topography yet. Use 'topography elevation load' first.")
-            return
-
         tier = self._world.topography.tiers.get(self._world.config.base_resolution)
         if tier is None or len(tier.elevation) == 0:
             print("No elevation data at base resolution. Use 'topography elevation load' first.")
@@ -297,6 +375,91 @@ class GeoSimREPL:
             title=f"{self._world.name} — elevation (t={t:.4g} yr)",
             colormap=colormap,
             units="m",
+        )
+
+    def _cmd_topography_elevation_export(self, args: list[str]) -> None:
+        """Handle: topography elevation export [<file>] [--time T] [--min-elev M] [--max-elev M]"""
+        out_path_arg: str | None = None
+        t: float | None = None
+        min_elev: float | None = None
+        max_elev: float | None = None
+
+        i = 0
+        while i < len(args):
+            flag = args[i]
+            if flag == "--time" and i + 1 < len(args):
+                try:
+                    t = float(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --time value: {args[i + 1]!r}")
+                    return
+                i += 2
+            elif flag == "--min-elev" and i + 1 < len(args):
+                try:
+                    min_elev = float(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --min-elev value: {args[i + 1]!r}")
+                    return
+                i += 2
+            elif flag == "--max-elev" and i + 1 < len(args):
+                try:
+                    max_elev = float(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --max-elev value: {args[i + 1]!r}")
+                    return
+                i += 2
+            elif not flag.startswith("--") and out_path_arg is None:
+                out_path_arg = flag
+                i += 1
+            else:
+                print(f"Unknown option: {flag!r}")
+                return
+
+        from geosim.io.store import exports_dir
+        from geosim.core.grid import natural_equirectangular_size, null_surface_map_png
+
+        grid_type = self._world.config.grid_type
+        resolution = self._world.config.base_resolution
+
+        tier = self._world.topography.tiers.get(resolution)
+        has_data = tier is not None and len(tier.elevation) > 0
+
+        export_root = exports_dir(self._world.name)
+
+        if not has_data:
+            # Save a blank mid-grey template at the natural size for this grid
+            fname = out_path_arg or f"{self._world.name}_elevation_blank.png"
+            out = export_root / fname if out_path_arg is None else fname
+            null_surface_map_png(out, grid_type, resolution)
+            nat_h, nat_w = natural_equirectangular_size(grid_type, resolution)
+            print(
+                f"No elevation data — saved blank template ({nat_w}×{nat_h}) to:\n  {out}\n"
+                f"Paint on it and reload with:\n"
+                f"  topography elevation load <file> --min-elev -8000 --max-elev 8000"
+            )
+            return
+
+        # Export actual elevation data
+        snap_t = tier.elevation.latest_time if t is None else t
+        try:
+            elevation = tier.elevation.get(snap_t)
+        except ValueError as exc:
+            print(f"No elevation data at t={snap_t}: {exc}")
+            return
+
+        from geosim.topography.exporter import export_elevation_png
+
+        t_tag = f"_t{snap_t:.4g}".replace(".", "p") if snap_t != 0.0 else ""
+        fname = out_path_arg or f"{self._world.name}_elevation{t_tag}.png"
+        out = export_root / fname if out_path_arg is None else fname
+
+        used_min, used_max = export_elevation_png(
+            elevation, out, grid_type, resolution, min_elev, max_elev
+        )
+        print(
+            f"Exported elevation map to:\n  {out}\n"
+            f"Colour scale: black = {used_min:.0f} m, white = {used_max:.0f} m\n"
+            f"To reload: topography elevation load <file> --min-elev {used_min:.0f} --max-elev {used_max:.0f}"
         )
 
     def _cmd_branch(self, args: list[str]) -> None:
