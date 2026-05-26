@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from geosim.atmosphere.atmosphere import Atmosphere
 from geosim.climate.climate import Climate
 from geosim.geology.geology import Geology
 from geosim.planetology.planetology import Planetology
@@ -33,6 +34,7 @@ class World:
         self.planetology: Planetology | None = None
         self.geology: Geology | None = None
         self.topography: Topography | None = None
+        self.atmosphere: Atmosphere | None = None
         self.climate: Climate | None = None
 
     def status(self) -> str:
@@ -48,6 +50,7 @@ class World:
             f"Planetology:  {present(self.planetology)}",
             f"Geology:      {present(self.geology)}",
             f"Topography:   {present(self.topography)}",
+            f"Atmosphere:   {present(self.atmosphere)}",
             f"Climate:      {present(self.climate)}",
         ]
         return "\n".join(lines)

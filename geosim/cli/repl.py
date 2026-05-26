@@ -5,6 +5,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.styles import Style
 
+from geosim.atmosphere.atmosphere import Atmosphere
 from geosim.climate.climate import Climate
 from geosim.core.world import World, WorldConfig
 from geosim.geology.geology import Geology
@@ -15,7 +16,7 @@ from geosim.topography.topography import Topography
 _STYLE = Style.from_dict({"prompt": "ansigreen bold"})
 
 _GLOBAL_COMMANDS = ["new", "open", "list", "help", "exit", "quit"]
-_WORLD_COMMANDS = ["status", "planetology", "geology", "topography", "climate", "close", "branch", "help", "exit", "quit"]
+_WORLD_COMMANDS = ["status", "planetology", "geology", "topography", "atmosphere", "climate", "close", "branch", "help", "exit", "quit"]
 
 _GLOBAL_HELP = """\
 Commands:
@@ -31,11 +32,18 @@ Commands (world open):
   planetology [help]           planetology commands
   geology [help]               geology commands
   topography [help]            topography commands
+  atmosphere [help]            atmosphere commands
   climate [help]               climate commands
   branch <t> <name>            create a new world branching from time t
   close                        close current world without exiting
   help                         show this message
   exit / quit                  exit geosim"""
+
+_ATMOSPHERE_HELP = """\
+Atmosphere commands:
+  atmosphere                   show atmosphere details
+  atmosphere new               create a new empty atmosphere
+  atmosphere help              show this message"""
 
 _PLANETOLOGY_HELP = """\
 Planetology commands:
@@ -184,8 +192,10 @@ class GeoSimREPL:
                 self._cmd_object("geology", Geology, args, _GEOLOGY_HELP)
             elif cmd == "topography":
                 self._cmd_topography(args)
+            elif cmd == "atmosphere":
+                self._cmd_object("atmosphere", Atmosphere, args, _ATMOSPHERE_HELP)
             elif cmd == "climate":
-                self._cmd_object("climate", Climate, args, _CLIMATE_HELP)
+                self._cmd_climate(args)
             elif cmd == "branch":
                 self._cmd_branch(args)
             else:
