@@ -74,7 +74,31 @@ _CLIMATE_HELP = """\
 Climate commands:
   climate                      show climate details
   climate new                  create a new empty climate
+  climate simulate             run the climate simulation
+    [--iterations <n>]         (default: 1)
   climate help                 show this message"""
+
+_CLIMATE_SIMULATE_HELP = """\
+climate simulate [--iterations <n>]
+
+  Run the climate simulation for the current world state, producing planet-wide
+  maps of surface temperature, air pressure, precipitation, and other fields.
+  Results are appended to the climate history at the current world time.
+
+  When --iterations is greater than 1 the simulation is run that many times in
+  sequence.  Each pass starts from the output of the previous one, allowing the
+  solution to converge before being stored.
+
+  Requires a Climate object to exist ('climate new').  Uses the current
+  Topography, Geology, and Planetology objects if they exist; missing objects
+  are treated as absent (flat sea-level surface, no geological variation, etc.).
+
+Options:
+  --iterations <n>   number of simulation passes to run  (default: 1)
+
+Examples:
+  climate simulate
+  climate simulate --iterations 10"""
 
 _TOPOGRAPHY_ELEVATION_HELP = """\
 topography elevation <action> [options]
@@ -546,6 +570,113 @@ class GeoSimREPL:
             return
         # TODO: implement branching
         print("branch: not yet implemented.")
+
+    # --- climate commands ---
+
+    def _cmd_climate(self, args: list[str]) -> None:
+        if not self._world:
+            print("No world is currently open.")
+            return
+
+        if not args or args[0] == "status":
+            self._cmd_subobject("climate")
+            return
+
+        if args[0] in ("help", "--help"):
+            print(_CLIMATE_HELP)
+            return
+
+        if args[0] == "new":
+            if self._world.climate is not None:
+                print("This world already has a climate.")
+                return
+            self._world.climate = Climate()
+            store.save_world(self._world)
+            print("Created new climate.")
+            return
+
+        # All sub-commands below require a Climate object
+        if self._world.climate is None:
+            print("No climate yet. Run 'climate new' first.")
+            return
+
+        if args[0] == "simulate":
+            self._cmd_climate_simulate(args[1:])
+            return
+
+        print(f"Unknown climate sub-command: '{args[0]}'. Type 'climate help' for usage.")
+
+    def _cmd_climate_simulate(self, args: list[str]) -> None:
+        """Handle: climate simulate [--iterations <n>]"""
+        if "--help" in args:
+            print(_CLIMATE_SIMULATE_HELP)
+            return
+
+        iterations = 1
+        i = 0
+        while i < len(args):
+            flag = args[i]
+            if flag == "--iterations" and i + 1 < len(args):
+                try:
+                    iterations = int(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --iterations value: {args[i + 1]!r} (must be a positive integer)")
+                    return
+                if iterations < 1:
+                    print("--iterations must be at least 1.")
+                    return
+                i += 2
+            else:
+                print(f"Unknown option: {flag!r}. Run 'climate simulate --help' for usage.")
+                return
+
+        from geosim.climate.simulator import simulate_climate, _CLIMATE_FIELDS
+
+        world = self._world
+        climate = world.climate
+
+        # Seed the initial state from the most recent climate snapshot, if any
+        initial_state = None
+        latest_t = None
+        for field, _ in _CLIMATE_FIELDS:
+            h = getattr(climate, field)
+            if len(h) > 0:
+                if latest_t is None:
+                    latest_t = h.latest_time
+                if initial_state is None:
+                    initial_state = {}
+                initial_state[field] = h.get(latest_t)
+
+        iter_word = "iteration" if iterations == 1 else "iterations"
+        print(f"Running climate simulation ({iterations} {iter_word})…")
+
+        state = initial_state
+        for n in range(iterations):
+            if iterations > 1:
+                print(f"  Pass {n + 1}/{iterations}…")
+            state = simulate_climate(
+                config=world.config,
+                topography=world.topography,
+                geology=world.geology,
+                planetology=world.planetology,
+                atmosphere=world.atmosphere,
+                initial_state=state,
+            )
+
+        # Append results to climate histories at current world time
+        t = world.current_time
+        for field, _ in _CLIMATE_FIELDS:
+            h = getattr(climate, field)
+            h.append(t, state[field])
+
+        store.save_world(world)
+        print(
+            f"Climate simulation complete. Results stored at t={t:.4g} yr.\n"
+            + "\n".join(
+                f"  {field}: shape={state[field].shape}"
+                for field, _ in _CLIMATE_FIELDS
+            )
+        )
 
 
 def main() -> None:

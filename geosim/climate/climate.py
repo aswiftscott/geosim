@@ -16,6 +16,7 @@ class Climate:
         self.surface_temperature: History = History()   # K per pixel
         self.air_pressure: History = History()          # Pa per pixel
         self.precipitation: History = History()         # mm/yr per pixel
+        self.humidity: History = History()              # specific humidity, kg/kg per pixel (mass of water vapour per kg of moist air)
         # additional fields: TBD
 
     def status(self) -> str:
@@ -24,6 +25,7 @@ class Climate:
             ("surface_temperature", "K"),
             ("air_pressure",        "Pa"),
             ("precipitation",       "mm/yr"),
+            ("humidity",            "kg/kg"),
         ]
         lines = ["Climate:"]
         for name, unit in fields:
@@ -33,6 +35,6 @@ class Climate:
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        fields = ["surface_temperature", "air_pressure", "precipitation"]
+        fields = ["surface_temperature", "air_pressure", "precipitation", "humidity"]
         populated = [f for f in fields if len(getattr(self, f)) > 0]
         return f"Climate(fields set: {populated})"
