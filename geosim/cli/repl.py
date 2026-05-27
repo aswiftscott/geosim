@@ -72,33 +72,67 @@ Topography commands:
 
 _CLIMATE_HELP = """\
 Climate commands:
-  climate                      show climate details
-  climate new                  create a new empty climate
-  climate simulate             run the climate simulation
-    [--iterations <n>]         (default: 1)
-  climate help                 show this message"""
+  climate                        show climate details
+  climate new [--seasons <n>]    create a new empty climate (default: 4 seasons)
+  climate simulate               run all simulation steps in order
+    [--iterations <n>]           (default: 1)
+  climate <step> compute         run a single simulation step
+  climate <step> compute --help  detailed help for that step
+  climate help                   show this message
+
+Simulation steps (run in this order by 'climate simulate'):
+  itcz          compute ITCZ probability map
+  insolation    compute solar irradiance per pixel        [stub]
+  surface-albedo compute surface albedo                  [stub]
+  optical-depth  compute optical depth + effective albedo [stub]
+  temperature    compute surface temperature              [stub]
+  pressure       compute air pressure                    [stub]
+  precipitation  compute precipitation                   [stub]
+  humidity       compute specific humidity               [stub]"""
 
 _CLIMATE_SIMULATE_HELP = """\
 climate simulate [--iterations <n>]
 
-  Run the climate simulation for the current world state, producing planet-wide
-  maps of surface temperature, air pressure, precipitation, and other fields.
-  Results are appended to the climate history at the current world time.
-
-  When --iterations is greater than 1 the simulation is run that many times in
-  sequence.  Each pass starts from the output of the previous one, allowing the
-  solution to converge before being stored.
-
-  Requires a Climate object to exist ('climate new').  Uses the current
-  Topography, Geology, and Planetology objects if they exist; missing objects
-  are treated as absent (flat sea-level surface, no geological variation, etc.).
+  Run all simulation steps in order, committing results to the climate
+  history at the current world time.  When --iterations > 1, the full
+  sequence is repeated in memory and only the final pass is saved.
 
 Options:
-  --iterations <n>   number of simulation passes to run  (default: 1)
+  --iterations <n>   number of full passes to run  (default: 1)
 
 Examples:
   climate simulate
-  climate simulate --iterations 10"""
+  climate simulate --iterations 5"""
+
+_CLIMATE_ITCZ_HELP = """\
+climate itcz compute
+
+  Compute the ITCZ (Intertropical Convergence Zone) probability map and
+  save it to the climate history.
+
+  If a surface_temperature map already exists (from a previous run), the
+  ITCZ is derived from the thermal equator (latitude of max temperature
+  per longitude column).  Otherwise it is estimated from the land/ocean
+  distribution in the topography.
+
+  Output: climate.itcz — shape (n_seasons, n_pixels), values 0–1."""
+
+# Mapping from CLI sub-command token to internal step name
+_CLI_TO_STEP: dict[str, str] = {
+    "itcz":           "itcz",
+    "insolation":     "insolation",
+    "surface-albedo": "surface_albedo",
+    "optical-depth":  "optical_depth",
+    "temperature":    "temperature",
+    "pressure":       "pressure",
+    "precipitation":  "precipitation",
+    "humidity":       "humidity",
+}
+
+# Per-step help strings (None = use the generic stub message)
+_STEP_HELP: dict[str, str] = {
+    "itcz": _CLIMATE_ITCZ_HELP,
+}
 
 _TOPOGRAPHY_ELEVATION_HELP = """\
 topography elevation <action> [options]
@@ -590,9 +624,69 @@ class GeoSimREPL:
             if self._world.climate is not None:
                 print("This world already has a climate.")
                 return
-            self._world.climate = Climate()
+            n_seasons = 4
+            new_args = args[1:]
+            i = 0
+            ok = True
+            while i < len(new_args):
+                flag = new_args[i]
+                if flag == "--seasons" and i + 1 < len(new_args):
+                    try:
+                        n_seasons = int(new_args[i + 1])
+                    except ValueError:
+                        print(f"Invalid --seasons value: {new_args[i + 1]!r} (must be a positive even integer)")
+                        ok = False
+                        break
+                    if n_seasons < 1 or n_seasons % 2 != 0:
+                        print("--seasons must be a positive even integer (e.g. 2, 4, 6, 8).")
+                        ok = False
+                        break
+                    i += 2
+                else:
+                    print(f"Unknown option: {flag!r}. Usage: climate new [--seasons <n>]")
+                    ok = False
+                    break
+            if not ok:
+                return
+
+            # Validate that the planetology is compatible with the rapid-rotator
+            # climate model before creating the climate object.
+            pl = self._world.planetology
+            if pl is None or len(pl.day_length) == 0 or len(pl.year_length) == 0:
+                print(
+                    "Cannot create a climate: planetology must exist and have "
+                    "day_length and year_length set first."
+                )
+                return
+
+            day_hr  = pl.day_length.get(pl.day_length.latest_time)    # hours
+            year_dy = pl.year_length.get(pl.year_length.latest_time)  # days
+            day_dy  = day_hr / 24.0
+
+            errors = []
+            if day_dy >= 30:
+                errors.append(
+                    f"  Day length {day_dy:.2f} Earth days is ≥ 30 days "
+                    "(rapid-rotator model requires < 30 days)."
+                )
+            if year_dy >= 36500:
+                errors.append(
+                    f"  Year length {year_dy:.2f} Earth days is ≥ 100 Earth years "
+                    "(climate model requires < 100 Earth years)."
+                )
+            if year_dy < 10 * day_dy:
+                errors.append(
+                    f"  Year ({year_dy:.2f} days) is less than 10× the day "
+                    f"({day_dy:.4g} days); climate model requires year ≥ 10 × day."
+                )
+            if errors:
+                print("Cannot create a climate — planetology is outside supported range:")
+                print("\n".join(errors))
+                return
+
+            self._world.climate = Climate(n_seasons=n_seasons)
             store.save_world(self._world)
-            print("Created new climate.")
+            print(f"Created new climate (n_seasons={n_seasons}).")
             return
 
         # All sub-commands below require a Climate object
@@ -604,7 +698,53 @@ class GeoSimREPL:
             self._cmd_climate_simulate(args[1:])
             return
 
+        # climate <step> <action> [options]
+        if args[0] in _CLI_TO_STEP:
+            step_args = args[1:]
+            if not step_args or step_args[0] in ("help", "--help"):
+                self._cmd_climate_step_help(args[0])
+            elif step_args[0] == "compute":
+                self._cmd_climate_step_compute(args[0], step_args[1:])
+            else:
+                print(f"Unknown action '{step_args[0]}' for 'climate {args[0]}'. "
+                      f"Try 'climate {args[0]} compute' or 'climate {args[0]} --help'.")
+            return
+
         print(f"Unknown climate sub-command: '{args[0]}'. Type 'climate help' for usage.")
+
+    def _cmd_climate_step_help(self, cli_name: str) -> None:
+        """Print help for a single simulation step."""
+        from geosim.climate.simulator import _STEP_OUTPUTS
+        help_text = _STEP_HELP.get(cli_name)
+        if help_text:
+            print(help_text)
+        else:
+            step = _CLI_TO_STEP[cli_name]
+            outputs = ", ".join(_STEP_OUTPUTS.get(step, [step]))
+            print(f"climate {cli_name} compute\n\n"
+                  f"  Run the '{cli_name}' simulation step.\n"
+                  f"  Output field(s): {outputs}\n\n"
+                  f"  [Not yet implemented — runs as a no-op.]")
+
+    def _cmd_climate_step_compute(self, cli_name: str, args: list[str]) -> None:
+        """Handle: climate <step> compute [--help]"""
+        if "--help" in args:
+            self._cmd_climate_step_help(cli_name)
+            return
+
+        from geosim.climate.simulator import run_step, _STEP_OUTPUTS
+        step = _CLI_TO_STEP[cli_name]
+        outputs = _STEP_OUTPUTS.get(step, [step])
+
+        print(f"Computing {cli_name}...")
+        run_step(self._world, step)
+        store.save_world(self._world)
+
+        t = self._world.current_time
+        print(f"Saved to climate history at t={t:.4g} yr:")
+        for field in outputs:
+            arr = getattr(self._world.climate, field).get(t)
+            print(f"  {field}: shape={arr.shape}")
 
     def _cmd_climate_simulate(self, args: list[str]) -> None:
         """Handle: climate simulate [--iterations <n>]"""
@@ -633,50 +773,15 @@ class GeoSimREPL:
         from geosim.climate.simulator import simulate_climate, _CLIMATE_FIELDS
 
         world = self._world
-        climate = world.climate
-
-        # Seed the initial state from the most recent climate snapshot, if any
-        initial_state = None
-        latest_t = None
-        for field, _ in _CLIMATE_FIELDS:
-            h = getattr(climate, field)
-            if len(h) > 0:
-                if latest_t is None:
-                    latest_t = h.latest_time
-                if initial_state is None:
-                    initial_state = {}
-                initial_state[field] = h.get(latest_t)
-
         iter_word = "iteration" if iterations == 1 else "iterations"
-        print(f"Running climate simulation ({iterations} {iter_word})…")
+        print(f"Running climate simulation ({iterations} {iter_word})...")
 
-        state = initial_state
-        for n in range(iterations):
-            if iterations > 1:
-                print(f"  Pass {n + 1}/{iterations}…")
-            state = simulate_climate(
-                config=world.config,
-                topography=world.topography,
-                geology=world.geology,
-                planetology=world.planetology,
-                atmosphere=world.atmosphere,
-                initial_state=state,
-            )
-
-        # Append results to climate histories at current world time
-        t = world.current_time
-        for field, _ in _CLIMATE_FIELDS:
-            h = getattr(climate, field)
-            h.append(t, state[field])
+        simulate_climate(world, n_iterations=iterations)
 
         store.save_world(world)
-        print(
-            f"Climate simulation complete. Results stored at t={t:.4g} yr.\n"
-            + "\n".join(
-                f"  {field}: shape={state[field].shape}"
-                for field, _ in _CLIMATE_FIELDS
-            )
-        )
+        t = world.current_time
+        print(f"Climate simulation complete. Results stored at t={t:.4g} yr.")
+
 
 
 def main() -> None:

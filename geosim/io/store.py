@@ -81,9 +81,22 @@ def load_world(name: str) -> World:
 def save_map_history(group: h5py.Group, field: str, history) -> None:
     """Write a History of surface-map arrays to an HDF5 group.
 
-    Creates two datasets inside *group*:
+    Creates three objects inside *group*:
       ``<field>/times``     — 1-D float64 array of recorded timestamps
-      ``<field>/snapshots`` — 2-D array (n_snapshots × n_pixels), gzip-compressed
+      ``<field>/snapshots`` — uint8 array, gzip-compressed; original shape
+                              prefixed by a snapshot axis (n_snapshots, ...)
+    The ``snapshots`` dataset carries two scalar attributes:
+      ``scale``  — multiply decoded uint8 values by this to recover the
+                   original units  (float64)
+      ``offset`` — add this after scaling  (float64)
+
+    The encoding is:
+      stored = round((value − offset) / scale)   clamped to [0, 255]
+      value  = stored × scale + offset
+
+    A single global scale/offset is computed across all snapshots so that
+    values remain comparable across time.  Max round-trip error is
+    ``scale / 2`` per pixel.
 
     Does nothing if the History is empty.
     """
@@ -92,8 +105,22 @@ def save_map_history(group: h5py.Group, field: str, history) -> None:
         return
     fg = group.require_group(field)
     fg.create_dataset("times", data=np.array(times, dtype=np.float64))
-    snapshots = np.stack([history.get(t) for t in times])
-    fg.create_dataset("snapshots", data=snapshots, compression="gzip")
+
+    snapshots = np.stack([history.get(t) for t in times]).astype(np.float32)
+
+    s_min = float(snapshots.min())
+    s_max = float(snapshots.max())
+    s_range = s_max - s_min
+    scale  = s_range / 255.0 if s_range > 0.0 else 1.0
+    offset = s_min
+
+    uint8_data = np.clip(
+        np.round((snapshots - offset) / scale), 0, 255
+    ).astype(np.uint8)
+
+    ds = fg.create_dataset("snapshots", data=uint8_data, compression="gzip")
+    ds.attrs["scale"]  = np.float64(scale)
+    ds.attrs["offset"] = np.float64(offset)
 
 
 def load_map_history(group: h5py.Group, field: str, history) -> None:
@@ -101,13 +128,27 @@ def load_map_history(group: h5py.Group, field: str, history) -> None:
 
     Reads the datasets written by :func:`save_map_history` and appends
     each (time, snapshot) pair into *history* in chronological order.
+    If the ``snapshots`` dataset carries ``scale``/``offset`` attributes it
+    is decoded from uint8 back to float32; otherwise the raw data is used
+    (backwards-compatible with any pre-compression saves).
     """
     if field not in group:
         return
     fg = group[field]
     if "times" not in fg or "snapshots" not in fg:
         return
-    for t, snap in zip(fg["times"][:], fg["snapshots"][:]):
+
+    snaps_ds = fg["snapshots"]
+    raw = snaps_ds[:]
+
+    if raw.dtype == np.uint8 and "scale" in snaps_ds.attrs:
+        scale  = float(snaps_ds.attrs["scale"])
+        offset = float(snaps_ds.attrs["offset"])
+        snaps  = raw.astype(np.float32) * scale + offset
+    else:
+        snaps = raw  # legacy: data was stored as float directly
+
+    for t, snap in zip(fg["times"][:], snaps):
         history.append(float(t), snap)
 
 
