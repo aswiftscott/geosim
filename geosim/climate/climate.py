@@ -20,28 +20,34 @@ class Climate:
         world-time snapshot — one for each equal-length division of the year.
         Season index 0 corresponds to the northern hemisphere winter solstice.
         """
-        self.itcz: History = History()                  # (n_seasons, n_pixels) probability 0–1
-        self.insolation: History = History()            # (n_seasons, n_pixels) W/m²
-        self.surface_albedo: History = History()        # (n_seasons, n_pixels) dimensionless
-        self.optical_depth: History = History()         # (n_seasons, n_pixels) τ (dimensionless)
-        self.effective_albedo: History = History()      # (n_seasons, n_pixels) dimensionless
-        self.surface_temperature: History = History()   # (n_seasons, n_pixels) K
-        self.air_pressure: History = History()          # (n_seasons, n_pixels) Pa
-        self.precipitation: History = History()         # (n_seasons, n_pixels) mm/yr
-        self.humidity: History = History()              # (n_seasons, n_pixels) kg/kg
+        self.itcz: History = History()              # (n_seasons, n_pixels) probability 0–1
+        self.currents: History = History()          # (n_seasons, n_pixels) dimensionless proxy
+        self.ocean_temperature: History = History() # (n_seasons, n_pixels) K
+        self.pressure: History = History()          # (n_seasons, n_pixels) Pa
+        self.winds: History = History()             # (n_seasons, n_pixels) m/s
+        self.precipitation: History = History()     # (n_seasons, n_pixels) mm/yr
+        self.albedo: History = History()            # (n_seasons, n_pixels) dimensionless 0–1
+        self.cloud_cover: History = History()       # (n_seasons, n_pixels) dimensionless 0–1
+        self.sunlight: History = History()          # (n_seasons, n_pixels) W/m²
+        self.temperature: History = History()       # (n_seasons, n_pixels) K
+        self.pet: History = History()               # (n_seasons, n_pixels) mm/yr
+        self.aet: History = History()               # (n_seasons, n_pixels) mm/yr
 
     def status(self) -> str:
         """Return a human-readable summary of all climate map fields."""
         fields = [
-            ("itcz",                "prob"),
-            ("insolation",          "W/m²"),
-            ("surface_albedo",      ""),
-            ("optical_depth",       "τ"),
-            ("effective_albedo",    ""),
-            ("surface_temperature", "K"),
-            ("air_pressure",        "Pa"),
-            ("precipitation",       "mm/yr"),
-            ("humidity",            "kg/kg"),
+            ("itcz",              "prob"),
+            ("currents",          ""),
+            ("ocean_temperature", "K"),
+            ("pressure",          "Pa"),
+            ("winds",             "m/s"),
+            ("precipitation",     "mm/yr"),
+            ("albedo",            ""),
+            ("cloud_cover",       ""),
+            ("sunlight",          "W/m²"),
+            ("temperature",       "K"),
+            ("pet",               "mm/yr"),
+            ("aet",               "mm/yr"),
         ]
         lines = [f"Climate (n_seasons={self.n_seasons}):"]
         for name, unit in fields:
@@ -52,8 +58,9 @@ class Climate:
 
     def __repr__(self) -> str:
         fields = [
-            "itcz", "insolation", "surface_albedo", "optical_depth", "effective_albedo",
-            "surface_temperature", "air_pressure", "precipitation", "humidity",
+            "itcz", "currents", "ocean_temperature", "pressure", "winds",
+            "precipitation", "albedo", "cloud_cover", "sunlight",
+            "temperature", "pet", "aet",
         ]
         populated = [f for f in fields if len(getattr(self, f)) > 0]
         return f"Climate(n_seasons={self.n_seasons}, fields set: {populated})"

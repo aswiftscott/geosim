@@ -6,14 +6,28 @@ that runs all steps in order.
 
 Step order and the Climate fields each step produces:
 
-  1. itcz            -> climate.itcz
-  2. insolation      -> climate.insolation
-  3. surface_albedo  -> climate.surface_albedo
-  4. optical_depth   -> climate.optical_depth, climate.effective_albedo
-  5. temperature     -> climate.surface_temperature
-  6. pressure        -> climate.air_pressure
-  7. precipitation   -> climate.precipitation
-  8. humidity        -> climate.humidity
+1.  itcz        - Find ITCZ by identifying thermal equator (if available)
+                  (produces climate.itcz)
+2.  currents    - Simulate ocean currents/temperature from ITCZ and surface sunlight (if available)
+                  (produces climate.currents, climate.ocean_temperature)
+3.  pressure    - Approximate pressure and prevailing winds from ocean temperature and topography
+                  (produces climate.pressure, climate.winds)
+4.  precipitation - Simulate precipitation from pressure, winds, ocean temperature and topography
+                  (produces climate.precipitation)
+5.  albedo      - Approximate surface albedo from Koppen climate zone and geology (if available)
+                  (produces climate.albedo)
+6.  clouds      - Approximate cloud cover from Koppen climate zone, topography, and pressure/AET (if available)
+                  (produces climate.cloud_cover)
+7.  sunlight    - Compute surface sunlight from planetology variables and cloud cover
+                  (produces climate.sunlight)
+8.  temperature - Simulate temperature from surface sunlight, surface albedo, precipitation, and topography
+                  (produces climate.temperature)
+9.  evaporation - Calculate PET and AET from temperature, available sunlight, and precipitation
+                  (produces climate.pet, climate.aet)
+10. koppen      - Find Koppen Climate zones from temperature, precipitation, etc
+                  (produces a map for each Koppen zone - do not create yet)
+11. herzfeld    - Find Herzfeld climate zones from temperatures, PET, AET, etc
+                  (produces a map for each Herzfeld zone - do not create yet)
 """
 from __future__ import annotations
 
@@ -31,39 +45,48 @@ if TYPE_CHECKING:
 # All Climate fields, in the order they appear in status() output.
 # (field_name, unit_label)
 _CLIMATE_FIELDS: list[tuple[str, str]] = [
-    ("itcz",                "prob"),
-    ("insolation",          "W/m2"),
-    ("surface_albedo",      ""),
-    ("optical_depth",       "tau"),
-    ("effective_albedo",    ""),
-    ("surface_temperature", "K"),
-    ("air_pressure",        "Pa"),
-    ("precipitation",       "mm/yr"),
-    ("humidity",            "kg/kg"),
+    ("itcz",              "prob"),
+    ("currents",          ""),
+    ("ocean_temperature", "K"),
+    ("pressure",          "Pa"),
+    ("winds",             "m/s"),
+    ("precipitation",     "mm/yr"),
+    ("albedo",            ""),
+    ("cloud_cover",       ""),
+    ("sunlight",          "W/m2"),
+    ("temperature",       "K"),
+    ("pet",               "mm/yr"),
+    ("aet",               "mm/yr"),
 ]
 
 # Each step name maps to the Climate field(s) it produces.
 _STEP_OUTPUTS: dict[str, list[str]] = {
     "itcz":          ["itcz"],
-    "insolation":    ["insolation"],
-    "surface_albedo": ["surface_albedo"],
-    "optical_depth": ["optical_depth", "effective_albedo"],
-    "temperature":   ["surface_temperature"],
-    "pressure":      ["air_pressure"],
+    "currents":      ["currents", "ocean_temperature"],
+    "pressure":      ["pressure", "winds"],
     "precipitation": ["precipitation"],
-    "humidity":      ["humidity"],
+    "albedo":        ["albedo"],
+    "clouds":        ["cloud_cover"],
+    "sunlight":      ["sunlight"],
+    "temperature":   ["temperature"],
+    "evaporation":   ["pet", "aet"],
+    "koppen":        [],
+    "herzfeld":      [],
 }
 
 # Canonical step order for simulate_climate.
 _STEP_ORDER: list[str] = [
     "itcz",
-    "insolation",
-    "surface_albedo",
-    "optical_depth",
-    "temperature",
+    "currents",
     "pressure",
     "precipitation",
-    "humidity",
+    "albedo",
+    "clouds",
+    "sunlight",
+    "temperature",
+    "evaporation",
+    "koppen",
+    "herzfeld",
 ]
 
 # ---------------------------------------------------------------------------
@@ -117,7 +140,7 @@ def _commit_fields(world: "World", state: ClimateState, fields: list[str]) -> No
 
 def _step_itcz(world: "World", state: ClimateState) -> None:
     from geosim.climate.itcz import compute_itcz
-    prior_temp = state["surface_temperature"]
+    prior_temp = state["temperature"]
     # Treat an all-zero temperature array (first-pass default) as absent
     if not np.any(prior_temp):
         prior_temp = None
@@ -130,69 +153,97 @@ def _step_itcz(world: "World", state: ClimateState) -> None:
     )
 
 
-def _step_insolation(world: "World", state: ClimateState) -> None:
-    # TODO: compute per-pixel, per-season solar irradiance (W/m2).
-    # Depends on: planetology (insolation, axial_tilt, days_to_perihelion,
-    #   eccentricity, year_length, day_length).
-    # Output: state["insolation"], shape (n_seasons, n_pixels).
-    pass
-
-
-def _step_surface_albedo(world: "World", state: ClimateState) -> None:
-    # TODO: compute per-pixel surface albedo from land/ocean/ice classification.
-    # Depends on: topography (elevation -> ocean/land/ice), geology (rock type).
-    # Output: state["surface_albedo"], shape (n_seasons, n_pixels).
-    pass
-
-
-def _step_optical_depth(world: "World", state: ClimateState) -> None:
-    # TODO: compute per-pixel longwave optical depth and effective albedo.
-    # tau = atmosphere.compute_optical_depth(t, humidity)
-    # atm_a = atmosphere.compute_atmospheric_albedo(t, humidity)
-    # effective_albedo = atm_a + surface_albedo * (1 - atm_a)
-    # Output: state["optical_depth"], state["effective_albedo"], both (n_seasons, n_pixels).
-    pass
-
-
-def _step_temperature(world: "World", state: ClimateState) -> None:
-    # TODO: grey-atmosphere energy balance.
-    # T_eff = (S * (1 - alpha) / (4 * sigma))^0.25
-    # T_surface = T_eff * (1 + tau/2)^0.25
-    # Depends on: state["insolation"], state["effective_albedo"], state["optical_depth"].
-    # Output: state["surface_temperature"], shape (n_seasons, n_pixels).
+def _step_currents(world: "World", state: ClimateState) -> None:
+    # TODO: simulate ocean currents and ocean surface temperature.
+    # Depends on: state["itcz"], state["sunlight"], topography (ocean mask).
+    # Output: state["currents"] (m/s vector proxy), state["ocean_temperature"] (K).
+    # Both shape (n_seasons, n_pixels).
     pass
 
 
 def _step_pressure(world: "World", state: ClimateState) -> None:
-    # TODO: surface pressure from atmospheric mass and planetary gravity.
-    # P = atmosphere.compute_surface_pressure(t, planetology)
-    # Output: state["air_pressure"], shape (n_seasons, n_pixels).
+    # TODO: approximate surface pressure and prevailing winds.
+    # Depends on: state["ocean_temperature"], topography (elevation).
+    # Output: state["pressure"] (Pa), state["winds"] (m/s), both (n_seasons, n_pixels).
     pass
 
 
 def _step_precipitation(world: "World", state: ClimateState) -> None:
-    # TODO: precipitation from atmospheric circulation and orographic lifting.
-    # Depends on: state["itcz"], state["surface_temperature"], topography.
-    # Output: state["precipitation"], shape (n_seasons, n_pixels).
+    # TODO: simulate precipitation from atmospheric circulation and orographic lifting.
+    # Depends on: state["itcz"], state["pressure"], state["winds"],
+    #             state["ocean_temperature"], topography (elevation).
+    # Output: state["precipitation"] (mm/yr), shape (n_seasons, n_pixels).
     pass
 
 
-def _step_humidity(world: "World", state: ClimateState) -> None:
-    # TODO: specific humidity from precipitation and evaporation.
-    # Depends on: state["precipitation"], state["surface_temperature"].
-    # Output: state["humidity"], shape (n_seasons, n_pixels).
+def _step_albedo(world: "World", state: ClimateState) -> None:
+    # TODO: approximate surface albedo from Koppen climate zone and geology.
+    # Depends on: topography (elevation -> ocean/land/ice), geology (rock type).
+    # If a prior Koppen map exists, use it to refine the albedo estimate.
+    # Output: state["albedo"], shape (n_seasons, n_pixels), dimensionless 0–1.
+    pass
+
+
+def _step_clouds(world: "World", state: ClimateState) -> None:
+    # TODO: approximate cloud cover fraction.
+    # Depends on: topography, state["pressure"], state["aet"] (if available).
+    # If a prior Koppen map exists, use it to refine the cloud fraction.
+    # Output: state["cloud_cover"], shape (n_seasons, n_pixels), dimensionless 0–1.
+    pass
+
+
+def _step_sunlight(world: "World", state: ClimateState) -> None:
+    # TODO: compute surface solar irradiance after cloud attenuation.
+    # S_surface = S_top * (1 - cloud_cover * cloud_albedo)
+    # S_top derived from planetology (insolation, axial_tilt, eccentricity,
+    #   days_to_perihelion, year_length) and pixel latitude (HEALPix grid).
+    # Depends on: state["cloud_cover"], planetology.
+    # Output: state["sunlight"] (W/m²), shape (n_seasons, n_pixels).
+    pass
+
+
+def _step_temperature(world: "World", state: ClimateState) -> None:
+    # TODO: simulate surface temperature via energy balance.
+    # Depends on: state["sunlight"], state["albedo"], state["precipitation"],
+    #             topography (elevation for lapse rate).
+    # Output: state["temperature"] (K), shape (n_seasons, n_pixels).
+    pass
+
+
+def _step_evaporation(world: "World", state: ClimateState) -> None:
+    # TODO: calculate potential and actual evapotranspiration.
+    # PET from Penman-Monteith or Thornthwaite using state["temperature"] and state["sunlight"].
+    # AET = min(PET, available water from state["precipitation"]).
+    # Output: state["pet"] (mm/yr), state["aet"] (mm/yr), both (n_seasons, n_pixels).
+    pass
+
+
+def _step_koppen(world: "World", state: ClimateState) -> None:
+    # TODO: classify Koppen climate zones.
+    # Depends on: state["temperature"], state["precipitation"].
+    # Output: (do not create Climate fields yet — classification maps TBD).
+    pass
+
+
+def _step_herzfeld(world: "World", state: ClimateState) -> None:
+    # TODO: classify Herzfeld climate zones.
+    # Depends on: state["temperature"], state["pet"], state["aet"].
+    # Output: (do not create Climate fields yet — classification maps TBD).
     pass
 
 
 _STEP_FUNCTIONS = {
-    "itcz":           _step_itcz,
-    "insolation":     _step_insolation,
-    "surface_albedo": _step_surface_albedo,
-    "optical_depth":  _step_optical_depth,
-    "temperature":    _step_temperature,
-    "pressure":       _step_pressure,
-    "precipitation":  _step_precipitation,
-    "humidity":       _step_humidity,
+    "itcz":          _step_itcz,
+    "currents":      _step_currents,
+    "pressure":      _step_pressure,
+    "precipitation": _step_precipitation,
+    "albedo":        _step_albedo,
+    "clouds":        _step_clouds,
+    "sunlight":      _step_sunlight,
+    "temperature":   _step_temperature,
+    "evaporation":   _step_evaporation,
+    "koppen":        _step_koppen,
+    "herzfeld":      _step_herzfeld,
 }
 
 

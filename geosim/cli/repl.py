@@ -82,13 +82,16 @@ Climate commands:
 
 Simulation steps (run in this order by 'climate simulate'):
   itcz          compute ITCZ probability map
-  insolation    compute solar irradiance per pixel        [stub]
-  surface-albedo compute surface albedo                  [stub]
-  optical-depth  compute optical depth + effective albedo [stub]
-  temperature    compute surface temperature              [stub]
-  pressure       compute air pressure                    [stub]
-  precipitation  compute precipitation                   [stub]
-  humidity       compute specific humidity               [stub]"""
+  currents      compute ocean currents and temperature  [stub]
+  pressure      compute surface pressure and winds      [stub]
+  precipitation compute precipitation                   [stub]
+  albedo        compute surface albedo                  [stub]
+  clouds        compute cloud cover fraction            [stub]
+  sunlight      compute surface solar irradiance        [stub]
+  temperature   compute surface temperature             [stub]
+  evaporation   compute PET and AET                     [stub]
+  koppen        classify Koppen climate zones           [stub]
+  herzfeld      classify Herzfeld climate zones         [stub]"""
 
 _CLIMATE_SIMULATE_HELP = """\
 climate simulate [--iterations <n>]
@@ -119,14 +122,17 @@ climate itcz compute
 
 # Mapping from CLI sub-command token to internal step name
 _CLI_TO_STEP: dict[str, str] = {
-    "itcz":           "itcz",
-    "insolation":     "insolation",
-    "surface-albedo": "surface_albedo",
-    "optical-depth":  "optical_depth",
-    "temperature":    "temperature",
-    "pressure":       "pressure",
-    "precipitation":  "precipitation",
-    "humidity":       "humidity",
+    "itcz":          "itcz",
+    "currents":      "currents",
+    "pressure":      "pressure",
+    "precipitation": "precipitation",
+    "albedo":        "albedo",
+    "clouds":        "clouds",
+    "sunlight":      "sunlight",
+    "temperature":   "temperature",
+    "evaporation":   "evaporation",
+    "koppen":        "koppen",
+    "herzfeld":      "herzfeld",
 }
 
 # Per-step help strings (None = use the generic stub message)
