@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 import h5py
 
+from geosim.atmosphere.atmosphere import Atmosphere
+from geosim.climate.climate import Climate
 from geosim.core.world import World, WorldConfig
+from geosim.geology.geology import Geology
+from geosim.planetology.planetology import Planetology
 from geosim.topography.topography import Topography, TopographyTier
 
 WORLDS_DIR = Path.home() / ".geosim" / "worlds"
@@ -47,7 +51,14 @@ def save_world(world: World) -> None:
 
         if world.topography is not None:
             _save_topography(f, world.topography)
-    # TODO: serialize Planetology, Geology, Climate histories
+        if world.planetology is not None:
+            _save_planetology(f, world.planetology)
+        if world.geology is not None:
+            _save_geology(f, world.geology)
+        if world.atmosphere is not None:
+            _save_atmosphere(f, world.atmosphere)
+        if world.climate is not None:
+            _save_climate(f, world.climate)
 
 
 def load_world(name: str) -> World:
@@ -65,18 +76,50 @@ def load_world(name: str) -> World:
 
         if "topography" in f:
             world.topography = _load_topography(f)
-    # TODO: deserialize Planetology, Geology, Climate histories
+        if "planetology" in f:
+            world.planetology = _load_planetology(f)
+        if "geology" in f:
+            world.geology = _load_geology(f)
+        if "atmosphere" in f:
+            world.atmosphere = _load_atmosphere(f)
+        if "climate" in f:
+            world.climate = _load_climate(f)
     return world
 
 
 # ---------------------------------------------------------------------------
-# Generic surface-map History serialization
+# Generic History serialization helpers
 # ---------------------------------------------------------------------------
-# Each sub-object (Topography, Geology, Climate, …) stores its fields as
-# History objects containing planet-wide numpy arrays.  The two helpers below
-# handle the common case: a named field whose History entries are all arrays
-# of the same shape.  Sub-object save/load functions enumerate their fields
-# and delegate to these helpers.
+
+def save_scalar_history(group: h5py.Group, field: str, history) -> None:
+    """Write a History of scalar (float) values to an HDF5 group.
+
+    Creates two datasets inside *group*:
+      ``<field>/times``  — 1-D float64 array of recorded timestamps
+      ``<field>/values`` — 1-D float64 array of corresponding scalar values
+
+    Does nothing if the History is empty.
+    """
+    times = history.times
+    if not times:
+        return
+    fg = group.require_group(field)
+    fg.create_dataset("times",  data=np.array(times, dtype=np.float64))
+    fg.create_dataset("values", data=np.array(
+        [history.get(t) for t in times], dtype=np.float64
+    ))
+
+
+def load_scalar_history(group: h5py.Group, field: str, history) -> None:
+    """Read a History of scalar values from an HDF5 group."""
+    if field not in group:
+        return
+    fg = group[field]
+    if "times" not in fg or "values" not in fg:
+        return
+    for t, v in zip(fg["times"][:], fg["values"][:]):
+        history.append(float(t), float(v))
+
 
 def save_map_history(group: h5py.Group, field: str, history) -> None:
     """Write a History of surface-map arrays to an HDF5 group.
@@ -146,7 +189,7 @@ def load_map_history(group: h5py.Group, field: str, history) -> None:
         offset = float(snaps_ds.attrs["offset"])
         snaps  = raw.astype(np.float32) * scale + offset
     else:
-        snaps = raw  # legacy: data was stored as float directly
+        snaps = raw
 
     for t, snap in zip(fg["times"][:], snaps):
         history.append(float(t), snap)
@@ -170,3 +213,94 @@ def _load_topography(f: h5py.File) -> Topography:
         tier = topo.get_tier(int(res_str))
         load_map_history(rg, "elevation", tier.elevation)
     return topo
+
+
+# ---------------------------------------------------------------------------
+# Planetology serialization
+# ---------------------------------------------------------------------------
+
+_PLANETOLOGY_FIELDS = [name for name, _, _ in Planetology.FIELDS]
+
+
+def _save_planetology(f: h5py.File, pl: Planetology) -> None:
+    pg = f.create_group("planetology")
+    for field in _PLANETOLOGY_FIELDS:
+        save_scalar_history(pg, field, getattr(pl, field))
+
+
+def _load_planetology(f: h5py.File) -> Planetology:
+    pl = Planetology()
+    pg = f["planetology"]
+    for field in _PLANETOLOGY_FIELDS:
+        load_scalar_history(pg, field, getattr(pl, field))
+    return pl
+
+
+# ---------------------------------------------------------------------------
+# Geology serialization
+# ---------------------------------------------------------------------------
+
+_GEOLOGY_MAP_FIELDS = [
+    "plates", "orogenies", "subduction_zones", "large_igneous_provinces",
+]
+
+
+def _save_geology(f: h5py.File, geo: Geology) -> None:
+    gg = f.create_group("geology")
+    for field in _GEOLOGY_MAP_FIELDS:
+        save_map_history(gg, field, getattr(geo, field))
+
+
+def _load_geology(f: h5py.File) -> Geology:
+    geo = Geology()
+    gg = f["geology"]
+    for field in _GEOLOGY_MAP_FIELDS:
+        load_map_history(gg, field, getattr(geo, field))
+    return geo
+
+
+# ---------------------------------------------------------------------------
+# Atmosphere serialization
+# ---------------------------------------------------------------------------
+
+_ATMOSPHERE_FIELDS = [name for name, _, _ in Atmosphere.FIELDS]
+
+
+def _save_atmosphere(f: h5py.File, atm: Atmosphere) -> None:
+    ag = f.create_group("atmosphere")
+    for field in _ATMOSPHERE_FIELDS:
+        save_scalar_history(ag, field, getattr(atm, field))
+
+
+def _load_atmosphere(f: h5py.File) -> Atmosphere:
+    atm = Atmosphere()
+    ag = f["atmosphere"]
+    for field in _ATMOSPHERE_FIELDS:
+        load_scalar_history(ag, field, getattr(atm, field))
+    return atm
+
+
+# ---------------------------------------------------------------------------
+# Climate serialization
+# ---------------------------------------------------------------------------
+
+_CLIMATE_MAP_FIELDS = [
+    "itcz", "currents", "ocean_temperature", "pressure", "winds",
+    "precipitation", "albedo", "cloud_cover", "sunlight",
+    "temperature", "pet", "aet",
+]
+
+
+def _save_climate(f: h5py.File, climate: Climate) -> None:
+    cg = f.create_group("climate")
+    cg.attrs["n_seasons"] = climate.n_seasons
+    for field in _CLIMATE_MAP_FIELDS:
+        save_map_history(cg, field, getattr(climate, field))
+
+
+def _load_climate(f: h5py.File) -> Climate:
+    cg = f["climate"]
+    climate = Climate(n_seasons=int(cg.attrs["n_seasons"]))
+    for field in _CLIMATE_MAP_FIELDS:
+        load_map_history(cg, field, getattr(climate, field))
+    return climate
