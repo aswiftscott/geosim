@@ -119,7 +119,7 @@ Examples:
   topography elevation load earth.png --min-elev -11000 --max-elev 8850"""
 
 _TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
-topography elevation display [--time <t>] [--colormap <name>]
+topography elevation display [--resolution <r>] [--time <t>] [--colormap <name>]
 
   Display the elevation map in an interactive matplotlib window.
   Requires elevation data to have been loaded first.
@@ -131,11 +131,13 @@ topography elevation display [--time <t>] [--colormap <name>]
   matplotlib colormap instead.
 
 Options:
+  --resolution <r>  which resolution tier to display (default: highest available)
   --time <t>        snapshot time to display (default: latest)
   --colormap <name> use a plain matplotlib colormap (disables sea-level break)
 
 Example:
   topography elevation display
+  topography elevation display --resolution 6
   topography elevation display --colormap viridis"""
 
 _TOPOGRAPHY_ELEVATION_EXPORT_HELP = """\
@@ -458,21 +460,40 @@ class GeoSimREPL:
         )
 
     def _cmd_topography_elevation_display(self, args: list[str]) -> None:
-        """Handle: topography elevation display [--time T] [--colormap cmap]"""
+        """Handle: topography elevation display [--resolution R] [--time T] [--colormap cmap]"""
         if "--help" in args:
             print(_TOPOGRAPHY_ELEVATION_DISPLAY_HELP)
             return
-        tier = self._world.topography.tiers.get(self._world.config.base_resolution)
-        if tier is None or len(tier.elevation) == 0:
-            print("No elevation data at base resolution. Use 'topography elevation load' first.")
-            return
 
-        t = tier.elevation.latest_time
+        # Default to highest-resolution tier that has data.
+        populated = sorted(
+            (r for r, tier in self._world.topography.tiers.items() if len(tier.elevation) > 0),
+            reverse=True,
+        )
+        if not populated:
+            print("No elevation data loaded. Use 'topography elevation load' first.")
+            return
+        resolution: int = populated[0]
+
+        t: float = self._world.topography.tiers[resolution].elevation.latest_time
         colormap: str | None = None
         i = 0
         while i < len(args):
             flag = args[i]
-            if flag == "--time" and i + 1 < len(args):
+            if flag == "--resolution" and i + 1 < len(args):
+                try:
+                    resolution = int(args[i + 1])
+                except ValueError:
+                    print(f"Invalid --resolution value: {args[i + 1]!r}")
+                    return
+                tier = self._world.topography.tiers.get(resolution)
+                if tier is None or len(tier.elevation) == 0:
+                    available = ", ".join(str(r) for r in populated)
+                    print(f"No elevation data at resolution {resolution}. Available: {available}")
+                    return
+                t = tier.elevation.latest_time
+                i += 2
+            elif flag == "--time" and i + 1 < len(args):
                 try:
                     t = float(args[i + 1])
                 except ValueError:
@@ -486,6 +507,7 @@ class GeoSimREPL:
                 print(f"Unknown option: {flag!r}")
                 return
 
+        tier = self._world.topography.tiers[resolution]
         try:
             elevation = tier.elevation.get(t)
         except ValueError as exc:
@@ -494,13 +516,11 @@ class GeoSimREPL:
 
         from geosim.viz.display import display_surface_map
 
-        # Default: sea-level colormap with a hard break at 0 m.
-        # Override with --colormap to use a plain named colormap instead.
         display_surface_map(
             elevation,
             grid_type=self._world.config.grid_type,
-            resolution=self._world.config.base_resolution,
-            title=f"{self._world.name} — elevation (t={t:.4g} yr)",
+            resolution=resolution,
+            title=f"{self._world.name} — elevation (order {resolution}, t={t:.4g} yr)",
             colormap=colormap or "terrain",
             units="m",
             sea_level=None if colormap else 0.0,
