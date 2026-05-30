@@ -41,15 +41,37 @@ Commands (world open):
 
 _ATMOSPHERE_HELP = """\
 Atmosphere commands:
-  atmosphere                   show atmosphere details
-  atmosphere new               create a new empty atmosphere
-  atmosphere help              show this message"""
+  atmosphere                        show atmosphere details
+  atmosphere new                    create a new empty atmosphere
+  atmosphere set <field> <value>    set a scalar field at the current world time
+  atmosphere help                   show this message
+
+Settable fields:
+  n2          nitrogen          (mol frac)
+  o2          oxygen            (mol frac)
+  ar          argon             (mol frac)
+  co2         carbon dioxide    (mol frac)
+  ch4         methane           (mol frac)
+  n2o         nitrous oxide     (mol frac)
+  so2         sulfur dioxide    (mol frac)
+  total_mass  total atm. mass   (kg)"""
 
 _PLANETOLOGY_HELP = """\
 Planetology commands:
-  planetology                  show planetology details
-  planetology new              create a new empty planetology
-  planetology help             show this message"""
+  planetology                       show planetology details
+  planetology new                   create a new empty planetology
+  planetology set <field> <value>   set a scalar field at the current world time
+  planetology help                  show this message
+
+Settable fields:
+  radius              planetary radius        (m)
+  mass                planetary mass          (kg)
+  day_length          length of one day       (hr)
+  year_length         length of one year      (days)
+  eccentricity        orbital eccentricity    (dimensionless)
+  insolation          solar constant          (W/m²)
+  axial_tilt          axial tilt              (°)
+  days_to_perihelion  days from NH winter solstice to perihelion  (days)"""
 
 _GEOLOGY_HELP = """\
 Geology commands:
@@ -133,6 +155,31 @@ _CLI_TO_STEP: dict[str, str] = {
     "evaporation":   "evaporation",
     "koppen":        "koppen",
     "herzfeld":      "herzfeld",
+}
+
+# Settable scalar fields per object.  Only objects whose History fields hold
+# plain numbers (not per-pixel arrays or per-season tensors) appear here.
+_SETTABLE_FIELDS: dict[str, list[tuple[str, str]]] = {
+    "planetology": [
+        ("radius",             "m"),
+        ("mass",               "kg"),
+        ("day_length",         "hr"),
+        ("year_length",        "days"),
+        ("eccentricity",       ""),
+        ("insolation",         "W/m²"),
+        ("axial_tilt",         "°"),
+        ("days_to_perihelion", "days"),
+    ],
+    "atmosphere": [
+        ("n2",         "mol frac"),
+        ("o2",         "mol frac"),
+        ("ar",         "mol frac"),
+        ("co2",        "mol frac"),
+        ("ch4",        "mol frac"),
+        ("n2o",        "mol frac"),
+        ("so2",        "mol frac"),
+        ("total_mass", "kg"),
+    ],
 }
 
 # Per-step help strings (None = use the generic stub message)
@@ -326,12 +373,7 @@ class GeoSimREPL:
             print(obj.status())
 
     def _cmd_object(self, attr: str, cls, args: list[str], help_text: str) -> None:
-        """Generic dispatcher for top-level objects: handles 'new', 'help', and status.
-
-        Objects without field sub-commands yet (Planetology, Geology, Climate)
-        use this dispatcher.  When they gain sub-commands they will get their
-        own method like _cmd_topography.
-        """
+        """Generic dispatcher for top-level objects: handles 'new', 'help', 'set', and status."""
         if not self._world:
             print("No world is currently open.")
             return
@@ -358,7 +400,54 @@ class GeoSimREPL:
             print(f"No {attr} yet. Run '{attr} new' first.")
             return
 
+        if args[0] == "set":
+            self._cmd_object_set(attr, args[1:])
+            return
+
         print(f"Unknown {attr} sub-command: '{args[0]}'. Type '{attr} help' for usage.")
+
+    def _cmd_object_set(self, attr: str, args: list[str]) -> None:
+        """Handle: <object> set <field> <value>"""
+        settable = _SETTABLE_FIELDS.get(attr, [])
+        if not settable:
+            print(f"'{attr}' has no settable scalar fields.")
+            return
+
+        field_units = {name: unit for name, unit in settable}
+
+        if len(args) < 2:
+            field_list = "\n".join(
+                f"  {name:<22}{unit}" for name, unit in settable
+            )
+            print(f"Usage: {attr} set <field> <value>\n\nFields:\n{field_list}")
+            return
+
+        field, value_str = args[0], args[1]
+
+        if field not in field_units:
+            names = ", ".join(n for n, _ in settable)
+            print(f"Unknown field '{field}'. Settable fields: {names}")
+            return
+
+        try:
+            value = float(value_str)
+        except ValueError:
+            print(f"Invalid value {value_str!r} — must be a number.")
+            return
+
+        obj = getattr(self._world, attr)
+        h = getattr(obj, field)
+        t = self._world.current_time
+        try:
+            h.append(t, value)
+        except ValueError as exc:
+            print(f"Cannot set {attr}.{field}: {exc}")
+            return
+
+        store.save_world(self._world)
+        unit = field_units[field]
+        suffix = f" {unit}" if unit else ""
+        print(f"Set {attr}.{field} = {value}{suffix} at t={t:.4g} yr.")
 
     def _cmd_topography(self, args: list[str]) -> None:
         if not self._world:
