@@ -52,7 +52,8 @@ Actions:
 Run 'topography elevation <action> --help' for full details on each action."""
 
 TOPOGRAPHY_ELEVATION_LOAD_HELP = """\
-topography elevation load <file> [--min-elev <m>] [--max-elev <m>]
+topography elevation load <file> [--estimate-sea-level] [--min-elev <m>] [--max-elev <m>]
+                                 [--resolution <r>] [--max-pixels <n>]
 
   Load an elevation map from a greyscale PNG file.
   The PNG must use an equirectangular (plate carrée) projection.
@@ -61,26 +62,50 @@ topography elevation load <file> [--min-elev <m>] [--max-elev <m>]
     white (255) → --max-elev
 
 Arguments:
-  <file>          path to the input PNG (any resolution, any aspect ratio)
+  <file>                path to the input PNG (any resolution, any aspect ratio)
 
 Options:
-  --min-elev <m>  elevation value mapped to black  (default: -8000)
-  --max-elev <m>  elevation value mapped to white  (default:  8000)
+  --estimate-sea-level  auto-detect min/max so the most common brightness maps
+                        to 0 m (sea level); ignores --min-elev and --max-elev
+  --min-elev <m>        elevation value mapped to black  (default: -8000)
+  --max-elev <m>        elevation value mapped to white  (default:  8000)
+  --resolution <r>      HEALPix order to store the map at
+                        (default: world base_resolution)
 
-Example:
+                        Recommended range:
+                          4  –  3 072 px  ~410 km/px  geological sketches
+                          5  – 12 288 px  ~200 km/px  continental scale  ← default
+                          6  – 49 152 px  ~100 km/px  regional detail
+                          7  – 196 608 px   ~50 km/px  mountain-range scale
+                          8  – 786 432 px   ~25 km/px  high detail (slow)
+
+                        Each step up quadruples pixel count and memory use.
+
+  --max-pixels <n>      downsample source PNG if pixel count exceeds this
+                        (default: 100000000); pass 0 to disable
+
+Examples:
+  topography elevation load earth.png --estimate-sea-level
+  topography elevation load earth.png --estimate-sea-level --resolution 6
   topography elevation load earth.png --min-elev -11000 --max-elev 8850"""
 
 TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
-topography elevation display [--time <t>] [--colormap <name>]
+topography elevation display [--resolution <r>] [--time <t>] [--colormap <name>]
 
   Display the elevation map in an interactive matplotlib window.
   Requires elevation data to have been loaded first.
 
-Options:
-  --time <t>        snapshot time to display (default: latest)
-  --colormap <name> matplotlib colormap name  (default: terrain)
+  By default uses a sea-level colour map with a hard break at 0 m.
+  Pass --colormap to use a plain matplotlib colormap instead.
 
-Example:
+Options:
+  --resolution <r>  which resolution tier to display (default: highest available)
+  --time <t>        snapshot time to display (default: latest)
+  --colormap <name> plain matplotlib colormap name (disables sea-level break)
+
+Examples:
+  topography elevation display
+  topography elevation display --resolution 6
   topography elevation display --colormap viridis"""
 
 TOPOGRAPHY_ELEVATION_EXPORT_HELP = """\

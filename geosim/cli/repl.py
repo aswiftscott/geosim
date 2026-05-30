@@ -1,6 +1,8 @@
 """Interactive CLI for geosim."""
 from __future__ import annotations
 
+import shlex
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.styles import Style
@@ -57,7 +59,12 @@ class GeoSimREPL:
             if not text:
                 continue
 
-            parts = text.split()
+            try:
+                parts = shlex.split(text)
+            except ValueError as exc:
+                print(f"Parse error: {exc}")
+                continue
+
             cmd, args = parts[0].lower(), parts[1:]
 
             if cmd in ("exit", "quit"):

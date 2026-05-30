@@ -70,33 +70,48 @@ def _elevation_load(world: "World", args: list[str]) -> None:
         print(TOPOGRAPHY_ELEVATION_LOAD_HELP)
         return
 
-    result = parse_flags(args, {"--min-elev": float, "--max-elev": float})
+    # --estimate-sea-level is a boolean flag; strip it before parse_flags.
+    estimate_sea_level = "--estimate-sea-level" in args
+    args = [a for a in args if a != "--estimate-sea-level"]
+
+    result = parse_flags(
+        args,
+        {"--min-elev": float, "--max-elev": float, "--resolution": int, "--max-pixels": int},
+    )
     if result is None:
         return
     flags, positionals = result
 
     if not positionals:
-        print("Usage: topography elevation load <file> [--min-elev M] [--max-elev M]")
+        print("Usage: topography elevation load <file> [options]  (use --help for details)")
         return
 
     path = positionals[0]
-    min_elev = flags.get("--min-elev", -8000.0)
-    max_elev = flags.get("--max-elev",  8000.0)
+    min_elev   = flags.get("--min-elev",   -8000.0)
+    max_elev   = flags.get("--max-elev",    8000.0)
+    resolution = flags.get("--resolution", world.config.base_resolution)
+    raw_mp     = flags.get("--max-pixels",  100_000_000)
+    max_pixels: int | None = None if raw_mp == 0 else raw_mp
 
-    if min_elev >= max_elev:
+    if not estimate_sea_level and min_elev >= max_elev:
         print("--min-elev must be less than --max-elev.")
         return
 
     from geosim.topography.loader import load_elevation_png
 
-    print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
+    if estimate_sea_level:
+        print(f"Loading elevation from '{path}' (estimating sea level from mode, resolution={resolution})…")
+    else:
+        print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m, resolution={resolution})…")
     try:
         elevation = load_elevation_png(
             path,
             grid_type=world.config.grid_type,
-            resolution=world.config.base_resolution,
+            resolution=resolution,
             min_elev=min_elev,
             max_elev=max_elev,
+            max_pixels=max_pixels,
+            estimate_sea_level=estimate_sea_level,
         )
     except FileNotFoundError:
         print(f"File not found: {path!r}")
@@ -105,7 +120,7 @@ def _elevation_load(world: "World", args: list[str]) -> None:
         print(f"Failed to load elevation: {exc}")
         return
 
-    tier = world.topography.get_tier(world.config.base_resolution)
+    tier = world.topography.get_tier(resolution)
     tier.elevation.append(world.current_time, elevation)
 
     print(
@@ -119,18 +134,29 @@ def _elevation_display(world: "World", args: list[str]) -> None:
         print(TOPOGRAPHY_ELEVATION_DISPLAY_HELP)
         return
 
-    tier = world.topography.tiers.get(world.config.base_resolution)
-    if tier is None or len(tier.elevation) == 0:
-        print("No elevation data at base resolution. Use 'topography elevation load' first.")
+    # Default to highest-resolution tier that has data.
+    populated = sorted(
+        (r for r, tier in world.topography.tiers.items() if len(tier.elevation) > 0),
+        reverse=True,
+    )
+    if not populated:
+        print("No elevation data loaded. Use 'topography elevation load' first.")
         return
 
-    result = parse_flags(args, {"--time": float, "--colormap": str})
+    result = parse_flags(args, {"--resolution": int, "--time": float, "--colormap": str})
     if result is None:
         return
     flags, _ = result
 
+    resolution = flags.get("--resolution", populated[0])
+    tier = world.topography.tiers.get(resolution)
+    if tier is None or len(tier.elevation) == 0:
+        available = ", ".join(str(r) for r in populated)
+        print(f"No elevation data at resolution {resolution}. Available: {available}")
+        return
+
     t = flags.get("--time", tier.elevation.latest_time)
-    colormap = flags.get("--colormap", "terrain")
+    colormap: str | None = flags.get("--colormap")
 
     try:
         elevation = tier.elevation.get(t)
@@ -143,10 +169,11 @@ def _elevation_display(world: "World", args: list[str]) -> None:
     display_surface_map(
         elevation,
         grid_type=world.config.grid_type,
-        resolution=world.config.base_resolution,
-        title=f"{world.name} — elevation (t={t:.4g} yr)",
-        colormap=colormap,
+        resolution=resolution,
+        title=f"{world.name} — elevation (order {resolution}, t={t:.4g} yr)",
+        colormap=colormap or "terrain",
         units="m",
+        sea_level=None if colormap else 0.0,
     )
 
 

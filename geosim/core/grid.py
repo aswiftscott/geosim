@@ -80,12 +80,79 @@ def sample_equirectangular(
 # PNG → surface-map loader
 # ---------------------------------------------------------------------------
 
+def open_png_array(
+    png_path: str | Path,
+    max_pixels: int | None = 100_000_000,
+) -> np.ndarray:
+    """Load a PNG as a 2-D float64 array of brightness values (0–255).
+
+    Converts to 8-bit grayscale and proportionally downsamples if the pixel
+    count exceeds *max_pixels*.  Pass ``None`` to disable the limit.
+
+    Args:
+        png_path:   Path to the PNG file (any colour mode).
+        max_pixels: Downsample if pixel count exceeds this.  Default 100 Mpx.
+
+    Returns:
+        float64 array of shape (H, W) with values in [0, 255].
+    """
+    import math
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None  # disable PIL's decompression-bomb guard
+
+    img = Image.open(png_path).convert("L")
+
+    if max_pixels is not None and img.width * img.height > max_pixels:
+        scale = math.sqrt(max_pixels / (img.width * img.height))
+        new_w = max(1, round(img.width  * scale))
+        new_h = max(1, round(img.height * scale))
+        print(
+            f"  Scaling image from {img.width}×{img.height} → {new_w}×{new_h} "
+            f"({img.width * img.height // 1_000_000}M → {new_w * new_h // 1_000_000}M pixels)"
+        )
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    return np.asarray(img, dtype=np.float64)
+
+
+def png_array_to_surface_map(
+    png_arr: np.ndarray,
+    grid_type: str,
+    resolution: int,
+    min_val: float,
+    max_val: float,
+) -> np.ndarray:
+    """Project and scale a pre-loaded brightness array to a surface-map.
+
+    Args:
+        png_arr:    float64 (H, W) array with brightness values 0–255.
+        grid_type:  'spherical' or 'flat'.
+        resolution: HEALPix order for spherical; grid side-length for flat.
+        min_val:    Value mapped to brightness 0.
+        max_val:    Value mapped to brightness 255.
+
+    Returns:
+        numpy float64 surface-map array (1-D for spherical, 2-D for flat).
+    """
+    H, W = png_arr.shape
+
+    if grid_type == "spherical":
+        lon_deg, lat_deg = healpix_pixel_lonlat(resolution)
+        brightness = sample_equirectangular(png_arr, lon_deg, lat_deg)
+    else:
+        brightness = zoom(png_arr, (resolution / H, resolution / W), order=1)
+
+    return min_val + (brightness / 255.0) * (max_val - min_val)
+
+
 def png_to_surface_map(
     png_path: str | Path,
     grid_type: str,
     resolution: int,
     min_val: float,
     max_val: float,
+    max_pixels: int | None = 100_000_000,
 ) -> np.ndarray:
     """Load a PNG as a planet-wide surface-map array.
 
@@ -110,23 +177,15 @@ def png_to_surface_map(
         resolution: HEALPix order for spherical; grid side-length for flat.
         min_val: Value mapped to pixel brightness 0.
         max_val: Value mapped to pixel brightness 255.
+        max_pixels: If set, images larger than this pixel count are scaled
+            down proportionally before processing (preserving aspect ratio).
+            Pass ``None`` to disable the limit entirely.
 
     Returns:
         numpy float64 array of values linearly scaled from min_val to max_val.
     """
-    from PIL import Image
-
-    img = Image.open(png_path).convert("L")  # force 8-bit grayscale
-    png_arr = np.asarray(img, dtype=np.float64)  # shape (H, W), values 0–255
-    H, W = png_arr.shape
-
-    if grid_type == "spherical":
-        lon_deg, lat_deg = healpix_pixel_lonlat(resolution)
-        brightness = sample_equirectangular(png_arr, lon_deg, lat_deg)
-    else:
-        brightness = zoom(png_arr, (resolution / H, resolution / W), order=1)
-
-    return min_val + (brightness / 255.0) * (max_val - min_val)
+    png_arr = open_png_array(png_path, max_pixels)
+    return png_array_to_surface_map(png_arr, grid_type, resolution, min_val, max_val)
 
 
 # ---------------------------------------------------------------------------
