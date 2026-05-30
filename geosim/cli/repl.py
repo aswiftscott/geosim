@@ -1,6 +1,8 @@
 """Interactive CLI for geosim."""
 from __future__ import annotations
 
+import shlex
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.styles import Style
@@ -79,7 +81,8 @@ Actions:
 Run 'topography elevation <action> --help' for full details on each action."""
 
 _TOPOGRAPHY_ELEVATION_LOAD_HELP = """\
-topography elevation load <file> [--estimate-sea-level] [--min-elev <m>] [--max-elev <m>] [--max-pixels <n>]
+topography elevation load <file> [--estimate-sea-level] [--min-elev <m>] [--max-elev <m>]
+                                 [--resolution <r>] [--max-pixels <n>]
 
   Load an elevation map from a greyscale PNG file.
   The PNG must use an equirectangular (plate carrée) projection.
@@ -95,13 +98,25 @@ Options:
                         to 0 m (sea level); ignores --min-elev and --max-elev
   --min-elev <m>        elevation value mapped to black  (default: -8000)
   --max-elev <m>        elevation value mapped to white  (default:  8000)
-  --max-pixels <n>      downsample if pixel count exceeds this  (default: 100000000)
-                        pass 0 to disable the limit entirely
+  --resolution <r>      HEALPix order to store the map at
+                        (default: world base_resolution)
+
+                        Recommended range:
+                          4  –  3 072 px  ~410 km/px  geological sketches
+                          5  – 12 288 px  ~200 km/px  continental scale  ← default
+                          6  – 49 152 px  ~100 km/px  regional detail
+                          7  – 196 608 px  ~50 km/px  mountain-range scale
+                          8  – 786 432 px  ~25 km/px  high detail (slow)
+
+                        Each step up quadruples pixel count and memory use.
+
+  --max-pixels <n>      downsample source PNG if pixel count exceeds this
+                        (default: 100000000); pass 0 to disable
 
 Examples:
   topography elevation load earth.png --estimate-sea-level
-  topography elevation load earth.png --min-elev -11000 --max-elev 8850
-  topography elevation load big_map.png --estimate-sea-level --max-pixels 50000000"""
+  topography elevation load earth.png --estimate-sea-level --resolution 6
+  topography elevation load earth.png --min-elev -11000 --max-elev 8850"""
 
 _TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
 topography elevation display [--time <t>] [--colormap <name>]
@@ -173,7 +188,12 @@ class GeoSimREPL:
             if not text:
                 continue
 
-            parts = text.split()
+            try:
+                parts = shlex.split(text)
+            except ValueError as exc:
+                print(f"Parse error: {exc}")
+                continue
+
             cmd, args = parts[0].lower(), parts[1:]
 
             if cmd in ("exit", "quit"):
@@ -346,7 +366,7 @@ class GeoSimREPL:
         print(f"Unknown topography sub-command: '{args[0]}'. Type 'topography help' for usage.")
 
     def _cmd_topography_elevation_load(self, args: list[str]) -> None:
-        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y] [--max-pixels N] [--estimate-sea-level]"""
+        """Handle: topography elevation load <file> [options]"""
         if not args or "--help" in args:
             print(_TOPOGRAPHY_ELEVATION_LOAD_HELP)
             return
@@ -357,6 +377,7 @@ class GeoSimREPL:
         min_elev = -8000.0
         max_elev = 8000.0
         max_pixels: int | None = 100_000_000
+        resolution: int = self._world.config.base_resolution
         estimate_sea_level = False
         i = 0
         while i < len(remaining):
@@ -378,6 +399,15 @@ class GeoSimREPL:
                     print(f"Invalid --max-elev value: {remaining[i + 1]!r}")
                     return
                 i += 2
+            elif flag == "--resolution" and i + 1 < len(remaining):
+                try:
+                    resolution = int(remaining[i + 1])
+                    if resolution < 0:
+                        raise ValueError
+                except ValueError:
+                    print(f"Invalid --resolution value: {remaining[i + 1]!r} (must be a non-negative integer)")
+                    return
+                i += 2
             elif flag == "--max-pixels" and i + 1 < len(remaining):
                 try:
                     v = int(remaining[i + 1])
@@ -397,14 +427,14 @@ class GeoSimREPL:
         from geosim.topography.loader import load_elevation_png
 
         if estimate_sea_level:
-            print(f"Loading elevation from '{path}' (estimating sea level from mode)…")
+            print(f"Loading elevation from '{path}' (estimating sea level from mode, resolution={resolution})…")
         else:
-            print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
+            print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m, resolution={resolution})…")
         try:
             elevation = load_elevation_png(
                 path,
                 grid_type=self._world.config.grid_type,
-                resolution=self._world.config.base_resolution,
+                resolution=resolution,
                 min_elev=min_elev,
                 max_elev=max_elev,
                 max_pixels=max_pixels,
@@ -417,7 +447,7 @@ class GeoSimREPL:
             print(f"Failed to load elevation: {exc}")
             return
 
-        tier = self._world.topography.get_tier(self._world.config.base_resolution)
+        tier = self._world.topography.get_tier(resolution)
         t = self._world.current_time
         tier.elevation.append(t, elevation)
 
