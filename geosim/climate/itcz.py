@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from typing import Any
     from geosim.core.world import WorldConfig
     from geosim.planetology.planetology import Planetology
     from geosim.topography.topography import Topography
@@ -374,50 +373,42 @@ def display_itcz(
         title:     Figure suptitle.
     """
     import matplotlib.pyplot as plt
-    from geosim.core.grid import surface_map_to_equirectangular
+    from geosim.viz.display import display_surface_map, subplot_grid
 
     grid_type  = config.grid_type
     resolution = config.base_resolution
-    extent     = [0, 360, -90, 90]
 
     if season is None:
         seasons_to_show = list(range(itcz.shape[0]))
     else:
         seasons_to_show = [season]
 
-    itcz_arrays = [itcz[s] for s in seasons_to_show]
-    itcz_titles = [f"ITCZ  (season {s})" for s in seasons_to_show]
+    n_panels = 1 + len(seasons_to_show)
+    nrows, ncols = subplot_grid(n_panels)
+    fig, axes_2d = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows),
+                                squeeze=False)
+    axes = axes_2d.flatten()
 
-    n_panels = 1 + len(itcz_arrays)
-    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 4))
-    if n_panels == 1:
-        axes = [axes]
+    # Hide unused cells
+    for i in range(n_panels, nrows * ncols):
+        axes[i].set_visible(False)
 
     # --- Panel 0: elevation / world map ---
-    ax = axes[0]
     if elevation is not None:
-        elev_img = surface_map_to_equirectangular(elevation, grid_type, resolution)
-        vmin, vmax = float(elevation.min()), float(elevation.max())
-        cmap = "terrain"
+        display_surface_map(elevation, grid_type, resolution,
+                            title="World map", colormap="terrain", units="m",
+                            ax=axes[0])
     else:
-        elev_img = np.zeros((180, 360), dtype=np.float32)
-        vmin, vmax = 0.0, 1.0
-        cmap = "Blues"
-    im = ax.imshow(elev_img, aspect="auto", extent=extent, origin="upper",
-                   cmap=cmap, vmin=vmin, vmax=vmax)
-    fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="m")
-    ax.set_title("World map")
-    _label_map_axes(ax)
+        blank = np.zeros(itcz.shape[1], dtype=np.float32)
+        display_surface_map(blank, grid_type, resolution,
+                            title="World map", colormap="Blues", ax=axes[0])
 
     # --- ITCZ panels ---
-    for i, (arr_1d, ptitle) in enumerate(zip(itcz_arrays, itcz_titles)):
-        ax = axes[i + 1]
-        img = surface_map_to_equirectangular(arr_1d, grid_type, resolution)
-        im  = ax.imshow(img, aspect="auto", extent=extent, origin="upper",
-                        cmap="YlOrRd", vmin=0.0, vmax=1.0)
-        fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="prob")
-        ax.set_title(ptitle)
-        _label_map_axes(ax)
+    for i, s in enumerate(seasons_to_show):
+        display_surface_map(itcz[s], grid_type, resolution,
+                            title=f"ITCZ  (season {s})",
+                            colormap="YlOrRd", vmin=0.0, vmax=1.0,
+                            units="prob", ax=axes[i + 1])
 
     if title:
         fig.suptitle(title)
@@ -425,9 +416,3 @@ def display_itcz(
     plt.show()
 
 
-def _label_map_axes(ax: "Any") -> None:
-    """Apply standard lon/lat axis labels to a map axes."""
-    ax.set_xlabel("Longitude (°)")
-    ax.set_ylabel("Latitude (°)")
-    ax.set_xticks(range(0, 361, 60))
-    ax.set_yticks(range(-90, 91, 30))
