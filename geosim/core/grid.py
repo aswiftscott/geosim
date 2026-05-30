@@ -86,6 +86,7 @@ def png_to_surface_map(
     resolution: int,
     min_val: float,
     max_val: float,
+    max_pixels: int | None = 100_000_000,
 ) -> np.ndarray:
     """Load a PNG as a planet-wide surface-map array.
 
@@ -110,13 +111,28 @@ def png_to_surface_map(
         resolution: HEALPix order for spherical; grid side-length for flat.
         min_val: Value mapped to pixel brightness 0.
         max_val: Value mapped to pixel brightness 255.
+        max_pixels: If set, images larger than this pixel count are scaled
+            down proportionally before processing (preserving aspect ratio).
+            Pass ``None`` to disable the limit entirely.
 
     Returns:
         numpy float64 array of values linearly scaled from min_val to max_val.
     """
+    import math
     from PIL import Image
 
+    # Raise PIL's built-in bomb limit to allow large-but-legitimate images.
+    Image.MAX_IMAGE_PIXELS = None
+
     img = Image.open(png_path).convert("L")  # force 8-bit grayscale
+
+    if max_pixels is not None and img.width * img.height > max_pixels:
+        scale = math.sqrt(max_pixels / (img.width * img.height))
+        new_w = max(1, round(img.width  * scale))
+        new_h = max(1, round(img.height * scale))
+        print(f"  Scaling image from {img.width}×{img.height} → {new_w}×{new_h} ({img.width * img.height // 1_000_000}M → {new_w * new_h // 1_000_000}M pixels)")
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
     png_arr = np.asarray(img, dtype=np.float64)  # shape (H, W), values 0–255
     H, W = png_arr.shape
 

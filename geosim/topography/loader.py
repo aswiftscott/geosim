@@ -14,6 +14,7 @@ def load_elevation_png(
     resolution: int,
     min_elev: float = -8000.0,
     max_elev: float = 8000.0,
+    max_pixels: int | None = 100_000_000,
 ) -> np.ndarray:
     """Load a PNG as a planet-wide elevation map (metres).
 
@@ -27,9 +28,11 @@ def load_elevation_png(
         resolution: HEALPix order for spherical; grid side-length for flat.
         min_elev: Elevation (m) mapped to pixel brightness 0.  Default −8000.
         max_elev: Elevation (m) mapped to pixel brightness 255.  Default 8000.
+        max_pixels: Downsample the PNG if it exceeds this pixel count.
+            Default 100 000 000 (100 Mpx).  Pass ``None`` to disable.
 
     Returns:
         numpy float64 array of elevation values in metres.
     """
-    return png_to_surface_map(png_path, grid_type, resolution, min_elev, max_elev)
+    return png_to_surface_map(png_path, grid_type, resolution, min_elev, max_elev, max_pixels)
 

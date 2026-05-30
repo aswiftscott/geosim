@@ -79,7 +79,7 @@ Actions:
 Run 'topography elevation <action> --help' for full details on each action."""
 
 _TOPOGRAPHY_ELEVATION_LOAD_HELP = """\
-topography elevation load <file> [--min-elev <m>] [--max-elev <m>]
+topography elevation load <file> [--min-elev <m>] [--max-elev <m>] [--max-pixels <n>]
 
   Load an elevation map from a greyscale PNG file.
   The PNG must use an equirectangular (plate carrée) projection.
@@ -88,14 +88,18 @@ topography elevation load <file> [--min-elev <m>] [--max-elev <m>]
     white (255) → --max-elev
 
 Arguments:
-  <file>          path to the input PNG (any resolution, any aspect ratio)
+  <file>             path to the input PNG (any resolution, any aspect ratio)
 
 Options:
-  --min-elev <m>  elevation value mapped to black  (default: -8000)
-  --max-elev <m>  elevation value mapped to white  (default:  8000)
+  --min-elev <m>     elevation value mapped to black  (default: -8000)
+  --max-elev <m>     elevation value mapped to white  (default:  8000)
+  --max-pixels <n>   if the PNG exceeds this pixel count it is scaled down
+                     proportionally before loading  (default: 100000000)
+                     pass 0 to disable the limit entirely
 
 Example:
-  topography elevation load earth.png --min-elev -11000 --max-elev 8850"""
+  topography elevation load earth.png --min-elev -11000 --max-elev 8850
+  topography elevation load big_map.png --max-pixels 50000000"""
 
 _TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
 topography elevation display [--time <t>] [--colormap <name>]
@@ -340,7 +344,7 @@ class GeoSimREPL:
         print(f"Unknown topography sub-command: '{args[0]}'. Type 'topography help' for usage.")
 
     def _cmd_topography_elevation_load(self, args: list[str]) -> None:
-        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y]"""
+        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y] [--max-pixels N]"""
         if not args or "--help" in args:
             print(_TOPOGRAPHY_ELEVATION_LOAD_HELP)
             return
@@ -350,6 +354,7 @@ class GeoSimREPL:
 
         min_elev = -8000.0
         max_elev = 8000.0
+        max_pixels: int | None = 100_000_000
         i = 0
         while i < len(remaining):
             flag = remaining[i]
@@ -365,6 +370,14 @@ class GeoSimREPL:
                     max_elev = float(remaining[i + 1])
                 except ValueError:
                     print(f"Invalid --max-elev value: {remaining[i + 1]!r}")
+                    return
+                i += 2
+            elif flag == "--max-pixels" and i + 1 < len(remaining):
+                try:
+                    v = int(remaining[i + 1])
+                    max_pixels = None if v == 0 else v
+                except ValueError:
+                    print(f"Invalid --max-pixels value: {remaining[i + 1]!r}")
                     return
                 i += 2
             else:
@@ -385,6 +398,7 @@ class GeoSimREPL:
                 resolution=self._world.config.base_resolution,
                 min_elev=min_elev,
                 max_elev=max_elev,
+                max_pixels=max_pixels,
             )
         except FileNotFoundError:
             print(f"File not found: {path!r}")
