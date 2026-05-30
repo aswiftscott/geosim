@@ -40,6 +40,14 @@ def list_worlds() -> list[str]:
     return sorted(p.stem for p in worlds_dir().glob("*.h5"))
 
 
+def delete_world(name: str) -> None:
+    """Delete a saved world file from disk."""
+    path = world_path(name)
+    if not path.exists():
+        raise FileNotFoundError(f"No world file found at {path}")
+    path.unlink()
+
+
 def save_world(world: World) -> None:
     """Persist a World to disk."""
     path = world_path(world.name)

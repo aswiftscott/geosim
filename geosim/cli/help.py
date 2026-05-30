@@ -11,6 +11,7 @@ Commands:
   new <name>          create a new world
   open <name>         open an existing world
   list                list all saved worlds
+  delete <name>       permanently delete a saved world
   help                show this message
   exit / quit         exit geosim"""
 
@@ -23,6 +24,8 @@ Commands (world open):
   topography [help]            topography commands
   atmosphere [help]            atmosphere commands
   climate [help]               climate commands
+  delete <object>              delete a top-level object (planetology, geology,
+                               topography, atmosphere, climate)
   branch <t> <name>            create a new world branching from time t
   close                        close current world without exiting
   help                         show this message

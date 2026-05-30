@@ -20,9 +20,9 @@ from .cmd_climate import cmd_climate
 
 _STYLE = Style.from_dict({"prompt": "ansigreen bold"})
 
-_GLOBAL_COMMANDS = ["new", "open", "list", "help", "exit", "quit"]
+_GLOBAL_COMMANDS = ["new", "open", "list", "delete", "help", "exit", "quit"]
 _WORLD_COMMANDS = [
-    "status", "save", "planetology", "geology", "topography",
+    "status", "save", "delete", "planetology", "geology", "topography",
     "atmosphere", "climate", "close", "branch", "help", "exit", "quit",
 ]
 
@@ -53,8 +53,10 @@ class GeoSimREPL:
                     style=_STYLE,
                 ).strip()
             except (EOFError, KeyboardInterrupt):
-                print("\nExiting.")
-                break
+                if self._confirm_close():
+                    print("\nExiting.")
+                    break
+                print()  # newline after ^C
 
             if not text:
                 continue
@@ -68,12 +70,16 @@ class GeoSimREPL:
             cmd, args = parts[0].lower(), parts[1:]
 
             if cmd in ("exit", "quit"):
+                if not self._confirm_close():
+                    continue
                 print("Exiting.")
                 break
             elif cmd == "help":
                 print(WORLD_HELP if self._world else GLOBAL_HELP)
             elif cmd == "list":
                 self._cmd_list()
+            elif cmd == "delete":
+                self._cmd_delete(args)
             elif cmd == "new":
                 self._cmd_new(args)
             elif cmd == "open":
@@ -131,9 +137,22 @@ class GeoSimREPL:
         self._world = store.load_world(name)
         print(f"Opened world '{name}'.")
 
+    def _confirm_close(self) -> bool:
+        """Prompt the user to save if a world is open. Returns True if it's safe to proceed."""
+        if not self._world:
+            return True
+        confirm = input(
+            f"World '{self._world.name}' may have unsaved changes. "
+            "Close without saving? [y/N] "
+        ).strip().lower()
+        return confirm == "y"
+
     def _cmd_close(self) -> None:
         if not self._world:
             print("No world is currently open.")
+            return
+        if not self._confirm_close():
+            print("Cancelled. Use 'save' to save first.")
             return
         print(f"Closed world '{self._world.name}'.")
         self._world = None
@@ -150,6 +169,46 @@ class GeoSimREPL:
             return
         store.save_world(self._world)
         print(f"World '{self._world.name}' saved.")
+
+    def _cmd_delete(self, args: list[str]) -> None:
+        if self._world:
+            self._cmd_delete_object(args)
+        else:
+            self._cmd_delete_world(args)
+
+    def _cmd_delete_world(self, args: list[str]) -> None:
+        if not args:
+            print("Usage: delete <world-name>")
+            return
+        name = args[0]
+        if not store.world_exists(name):
+            print(f"No world named '{name}' found.")
+            return
+        confirm = input(f"Delete world '{name}'? This cannot be undone. [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Cancelled.")
+            return
+        store.delete_world(name)
+        print(f"World '{name}' deleted.")
+
+    def _cmd_delete_object(self, args: list[str]) -> None:
+        _DELETABLE = ("planetology", "geology", "topography", "atmosphere", "climate")
+        if not args:
+            print(f"Usage: delete <object>  (one of: {', '.join(_DELETABLE)})")
+            return
+        name = args[0].lower()
+        if name not in _DELETABLE:
+            print(f"Unknown object '{name}'. Deletable objects: {', '.join(_DELETABLE)}")
+            return
+        if getattr(self._world, name) is None:
+            print(f"This world has no {name} to delete.")
+            return
+        confirm = input(f"Delete {name} from '{self._world.name}'? This cannot be undone. [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Cancelled.")
+            return
+        setattr(self._world, name, None)
+        print(f"Deleted {name} from '{self._world.name}'. Use 'save' to persist.")
 
 
 def main() -> None:
