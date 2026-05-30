@@ -34,11 +34,37 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from typing import Any
     from geosim.core.world import WorldConfig
     from geosim.planetology.planetology import Planetology
     from geosim.topography.topography import Topography
 
-_DEFAULT_AXIAL_TILT_DEG = 23.5  # used when planetology is absent or unset
+# ---------------------------------------------------------------------------
+# Physical constants
+# ---------------------------------------------------------------------------
+
+_DEFAULT_AXIAL_TILT_DEG = 23.5    # Earth-like axial tilt (degrees)
+
+# Thermal lag: not yet used, reserved for future refinement
+_THERMAL_LAG_LAND_DAYS  = 30.0    # land temperature peaks ~1 month after solstice
+_THERMAL_LAG_OCEAN_DAYS = 75.0    # ocean temperature peaks ~2.5 months after solstice
+
+# ODE relaxation rates (fraction of gap closed per degree of longitude).
+# Calibrated to Earth:
+#   _K_LAND:  ITCZ tracks ~90% of subsolar latitude over ~12 000 km of pure land
+#             (108 one-degree bins → k ≈ ln(10)/108 ≈ 0.021)
+#   _K_OCEAN: ITCZ returns to within 300 km of equator over ~8 000 km of open ocean
+#             (72 one-degree bins → k ≈ ln(1/0.12)/72 ≈ 0.029)
+_K_LAND  = 0.021
+_K_OCEAN = 0.029
+
+_N_LON_BINS  = 360    # longitude bins for the ODE scan (1° each)
+_N_ODE_PASSES = 3     # passes around the globe to establish periodicity
+
+_HIGHLAND_THRESHOLD_M = 3000.0   # elevation above which land blocks the ITCZ
+_HIGHLAND_HEAT_WEIGHT = -0.3     # heat weight for high terrain (negative → repels)
+
+_ITCZ_SIGMA_DEG = 7.0            # Gaussian half-width of the ITCZ band (degrees)
 
 
 def compute_itcz(
@@ -47,6 +73,7 @@ def compute_itcz(
     planetology: "Planetology | None",
     surface_temperature: np.ndarray | None,
     n_seasons: int = 4,
+    display_map: bool = True,
 ) -> np.ndarray:
     """Return the ITCZ probability map of shape ``(n_seasons, n_pixels)``,
     choosing the best available method.
@@ -69,7 +96,7 @@ def compute_itcz(
         Float32 array of shape ``(n_seasons, n_pixels)``, values in [0, 1].
     """
     if surface_temperature is not None:
-        return itcz_from_temperature(surface_temperature, config, planetology, n_seasons)
+        return itcz_from_temperature(surface_temperature, config, planetology, n_seasons, display_map)
 
     elevation: np.ndarray | None = None
     if topography is not None:
@@ -77,7 +104,7 @@ def compute_itcz(
         if tier is not None and len(tier.elevation) > 0:
             elevation = tier.elevation.get(tier.elevation.latest_time)
 
-    return itcz_from_topography(elevation, config, planetology, n_seasons)
+    return itcz_from_topography(elevation, config, planetology, n_seasons, display_map)
 
 
 def itcz_from_temperature(
@@ -85,6 +112,7 @@ def itcz_from_temperature(
     config: "WorldConfig",
     planetology: "Planetology | None" = None,
     n_seasons: int = 4,
+    display_map: bool = True,
 ) -> np.ndarray:
     """Estimate the ITCZ probability map from an existing surface-temperature field.
 
@@ -137,60 +165,132 @@ def itcz_from_topography(
     config: "WorldConfig",
     planetology: "Planetology | None" = None,
     n_seasons: int = 4,
-) -> np.ndarray:
+    display_map: bool = True,
+) -> "np.ndarray | tuple[np.ndarray, list[np.ndarray]]":
     """Estimate the ITCZ probability map from the land/ocean distribution.
 
-    Used on the first simulation pass when no surface-temperature map yet
-    exists.  The key insight is that landmasses heat up much more than oceans
-    in summer, pulling the ITCZ poleward.  The annual-mean thermal-equator
-    latitude at each longitude therefore depends on the land fraction north and
-    south of the geographic equator.
+    Used on the first simulation pass when no surface-temperature map yet exists.
+    Landmasses heat up much more than oceans in summer, pulling the ITCZ poleward.
 
-    If *elevation* is ``None`` (no topography loaded), the ITCZ follows the
-    solar declination over all longitudes.
+    Algorithm — first-order relaxation ODE integrated eastward:
+
+      For each longitude bin x (0° → 360°, wrapping):
+          y_target[s] = subsolar_lat[s] * heat_frac[x]
+          y[s]        = y[s] + k[x] * (y_target[s] - y[s])
+
+      where:
+        - subsolar_lat[s] = -axial_tilt * cos(2π * s / n_seasons)
+          (most poleward in midsummer, equatorial in winter)
+        - heat_frac[x]  = mean heat weight of pixels in longitude bin x
+            ocean (elev ≤ 0)          →  0.0  (ITCZ target = equator)
+            low land (0–3000 m)       →  1.0  (ITCZ target = subsolar lat)
+            high land (> 3000 m)      → −0.3  (ITCZ repelled, unlikely to cross)
+        - k[x] = blend of _K_OCEAN and _K_LAND based on |heat_frac[x]|
+
+      The scan repeats _N_ODE_PASSES times so that the starting condition at
+      x = 0 converges to the periodic solution (y at x = 359° feeds directly
+      into x = 0° of the next pass).
+
+    Constants are calibrated to Earth:
+      - Over Africa (≈100 % land, ≈12 000 km): ITCZ reaches ≈90 % of
+        subsolar latitude  →  k_land ≈ 0.021 per degree-lon.
+      - Over the Pacific (≈100 % ocean, ≈8 000 km): ITCZ returns to within
+        300 km of the equator  →  k_ocean ≈ 0.029 per degree-lon.
+
+    Per-bin ITCZ latitudes are converted to per-pixel probabilities via a
+    Gaussian centred at the bin latitude (σ = _ITCZ_SIGMA_DEG).
 
     Args:
-        elevation:   Per-pixel surface elevation (m), or None.  Pixels with
-            elevation > 0 are land; pixels <= 0 are ocean.
+        elevation:   (n_pixels,) elevation array, or None (pure-ocean fallback).
         config:      World grid configuration.
-        planetology: Used to read ``axial_tilt`` (degrees); the maximum
-            poleward excursion of the thermal equator scales with axial tilt.
-            If None or unset, defaults to _DEFAULT_AXIAL_TILT_DEG.
+        planetology: Used to read axial_tilt.  Falls back to
+                     _DEFAULT_AXIAL_TILT_DEG when None or empty.
         n_seasons:   Number of seasonal time-slices per year.
+        debug:       When True, return a tuple (final_result, pass_list) where
+                     pass_list[i] is the (n_seasons, n_pixels) probability array
+                     produced after ODE pass i+1.
 
     Returns:
-        Float32 array of shape ``(n_seasons, n_pixels)``, values in [0, 1].
-
-    Notes:
-        The thermal-equator displacement over land is proportional to the
-        signed land-fraction imbalance: delta_lat = tilt * (f_land_N - f_land_S)
-        where f_land_N and f_land_S are the land fractions in a latitude band
-        north and south of the sub-solar latitude at each longitude.
-
-    TODO:
-        1. Obtain per-pixel (lon, lat) from ``core.grid.healpix_pixel_lonlat``.
-        2. Build a land mask: ``land = elevation > 0``.
-        3. Read axial tilt from ``planetology.axial_tilt`` if available;
-           default to ``_DEFAULT_AXIAL_TILT_DEG``.
-        4. For each season s and longitude bin:
-           a. Compute the solar declination: decl = -tilt * cos(2*pi*s/N).
-           b. Compute f_land_N: fraction of land pixels between decl and
-              decl + tilt at that longitude.
-           c. Compute f_land_S: fraction of land pixels between decl - tilt
-              and decl at that longitude.
-           d. Thermal-equator latitude: lat_te = decl + tilt*(f_land_N - f_land_S).
-        5. For each pixel, compute angular distance from lat_te at the
-           corresponding season and longitude.
-        6. Apply Gaussian (sigma approx 10 deg) and normalise each season slice.
+        Float32 array of shape (n_seasons, n_pixels), values in [0, 1].
+        When debug=True, returns (array, list[array]) instead.
     """
+    # --- Pixel count and grid coordinates ---
     if elevation is not None:
         n_pixels = elevation.shape[0]
     else:
         n_pixels = 12 * (4 ** config.base_resolution)
 
-    # --- TODO: implement (see docstring) ---
-    # Placeholder: same as the temperature-based path for now.
-    return _seasonal_gaussians(n_pixels, n_seasons, config, planetology, sigma_deg=10.0)
+    if config.grid_type == "spherical":
+        from geosim.core.grid import healpix_pixel_lonlat
+        lon_deg, lat_deg = healpix_pixel_lonlat(config.base_resolution)
+        lon_deg = np.asarray(lon_deg, dtype=np.float32)
+        lat_deg = np.asarray(lat_deg, dtype=np.float32)
+    else:
+        side = config.base_resolution
+        row_idx = np.arange(n_pixels) // side
+        col_idx = np.arange(n_pixels) % side
+        lat_deg = np.linspace(90.0, -90.0, side, dtype=np.float32)[row_idx]
+        lon_deg = np.linspace(0.0, 360.0, side, endpoint=False, dtype=np.float32)[col_idx]
+
+    # Map each pixel to a longitude bin
+    bin_idx = np.floor(lon_deg / (360.0 / _N_LON_BINS)).astype(np.int32) % _N_LON_BINS
+
+    # --- Per-pixel heat weight ---
+    if elevation is not None:
+        heat_weight = np.where(
+            elevation <= 0,
+            0.0,
+            np.where(elevation > _HIGHLAND_THRESHOLD_M, _HIGHLAND_HEAT_WEIGHT, 1.0),
+        ).astype(np.float32)
+    else:
+        heat_weight = np.zeros(n_pixels, dtype=np.float32)
+
+    # --- Average heat weight per longitude bin ---
+    bin_counts = np.bincount(bin_idx, minlength=_N_LON_BINS).astype(np.float32)
+    bin_heat   = np.bincount(bin_idx, weights=heat_weight, minlength=_N_LON_BINS).astype(np.float32)
+    heat_frac  = np.zeros(_N_LON_BINS, dtype=np.float32)
+    nonempty = bin_counts > 0
+    heat_frac[nonempty] = bin_heat[nonempty] / bin_counts[nonempty]
+
+    # ODE response rate per bin (blends ocean and land rates by |heat_frac|)
+    k_per_bin = (_K_OCEAN + (_K_LAND - _K_OCEAN) * np.abs(heat_frac)).astype(np.float32)
+
+    # --- Axial tilt ---
+    axial_tilt = _DEFAULT_AXIAL_TILT_DEG
+    if planetology is not None and len(planetology.axial_tilt) > 0:
+        axial_tilt = float(planetology.axial_tilt.get(planetology.axial_tilt.latest_time))
+
+    # Subsolar latitude per season (s=0 = NH winter solstice → most southerly)
+    s_idx = np.arange(n_seasons, dtype=np.float32)
+    subsolar_lats = (-axial_tilt * np.cos(2.0 * np.pi * s_idx / n_seasons)).astype(np.float32)
+
+    # --- ODE passes ---
+    # y[s] carries the ITCZ latitude state for each season across all passes
+    y = np.zeros(n_seasons, dtype=np.float32)
+
+    pass_results: list[np.ndarray] = []
+
+    for k in range(_N_ODE_PASSES):
+        season_lats = np.empty((n_seasons, _N_LON_BINS), dtype=np.float32)
+        for x in range(_N_LON_BINS):
+            y_target = subsolar_lats * heat_frac[x]   # (n_seasons,)
+            y       += k_per_bin[x] * (y_target - y)  # (n_seasons,) in-place update
+            season_lats[:, x] = y
+
+        # Convert this pass's bin latitudes to per-pixel Gaussian probability
+        pass_prob = np.empty((n_seasons, n_pixels), dtype=np.float32)
+        for s in range(n_seasons):
+            centers = season_lats[s][bin_idx]          # (n_pixels,)
+            dist    = lat_deg - centers
+            pass_prob[s] = np.exp(-0.5 * (dist / _ITCZ_SIGMA_DEG) ** 2)
+        pass_results.append(pass_prob)
+
+        # Display ITCZ map
+        if display_map:
+            display_itcz(pass_prob, config, elevation, title="Pass " + str(k + 1))
+
+    final = pass_results[-1]
+    return final
 
 
 # ---------------------------------------------------------------------------
@@ -246,3 +346,88 @@ def _seasonal_gaussians(
         result[s] = np.exp(-0.5 * (dist / sigma_deg) ** 2).astype(np.float32)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Visualisation
+# ---------------------------------------------------------------------------
+
+def display_itcz(
+    itcz: np.ndarray,
+    config: "WorldConfig",
+    elevation: np.ndarray | None = None,
+    season: "int | None" = None,
+    title: str = "ITCZ",
+) -> None:
+    """Display the ITCZ probability map alongside an elevation world map.
+
+    Opens a single matplotlib window containing:
+      - Panel 0: world elevation map (terrain colourmap).
+      - Panel 1…n: ITCZ probability map for each season (YlOrRd colourmap).
+
+    Args:
+        itcz:      (n_seasons, n_pixels) ITCZ probability array.
+        config:    World grid configuration.
+        elevation: (n_pixels,) elevation array.  When None a blank map is shown.
+        season:    Season index to display.  When None (default), all seasons
+                   are shown, one panel each.
+        title:     Figure suptitle.
+    """
+    import matplotlib.pyplot as plt
+    from geosim.core.grid import surface_map_to_equirectangular
+
+    grid_type  = config.grid_type
+    resolution = config.base_resolution
+    extent     = [0, 360, -90, 90]
+
+    if season is None:
+        seasons_to_show = list(range(itcz.shape[0]))
+    else:
+        seasons_to_show = [season]
+
+    itcz_arrays = [itcz[s] for s in seasons_to_show]
+    itcz_titles = [f"ITCZ  (season {s})" for s in seasons_to_show]
+
+    n_panels = 1 + len(itcz_arrays)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 4))
+    if n_panels == 1:
+        axes = [axes]
+
+    # --- Panel 0: elevation / world map ---
+    ax = axes[0]
+    if elevation is not None:
+        elev_img = surface_map_to_equirectangular(elevation, grid_type, resolution)
+        vmin, vmax = float(elevation.min()), float(elevation.max())
+        cmap = "terrain"
+    else:
+        elev_img = np.zeros((180, 360), dtype=np.float32)
+        vmin, vmax = 0.0, 1.0
+        cmap = "Blues"
+    im = ax.imshow(elev_img, aspect="auto", extent=extent, origin="upper",
+                   cmap=cmap, vmin=vmin, vmax=vmax)
+    fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="m")
+    ax.set_title("World map")
+    _label_map_axes(ax)
+
+    # --- ITCZ panels ---
+    for i, (arr_1d, ptitle) in enumerate(zip(itcz_arrays, itcz_titles)):
+        ax = axes[i + 1]
+        img = surface_map_to_equirectangular(arr_1d, grid_type, resolution)
+        im  = ax.imshow(img, aspect="auto", extent=extent, origin="upper",
+                        cmap="YlOrRd", vmin=0.0, vmax=1.0)
+        fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="prob")
+        ax.set_title(ptitle)
+        _label_map_axes(ax)
+
+    if title:
+        fig.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+
+
+def _label_map_axes(ax: "Any") -> None:
+    """Apply standard lon/lat axis labels to a map axes."""
+    ax.set_xlabel("Longitude (°)")
+    ax.set_ylabel("Latitude (°)")
+    ax.set_xticks(range(0, 361, 60))
+    ax.set_yticks(range(-90, 91, 30))
