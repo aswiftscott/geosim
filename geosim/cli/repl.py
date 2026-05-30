@@ -16,7 +16,7 @@ from geosim.topography.topography import Topography
 _STYLE = Style.from_dict({"prompt": "ansigreen bold"})
 
 _GLOBAL_COMMANDS = ["new", "open", "list", "help", "exit", "quit"]
-_WORLD_COMMANDS = ["status", "planetology", "geology", "topography", "atmosphere", "climate", "close", "branch", "help", "exit", "quit"]
+_WORLD_COMMANDS = ["status", "save", "planetology", "geology", "topography", "atmosphere", "climate", "close", "branch", "help", "exit", "quit"]
 
 _GLOBAL_HELP = """\
 Commands:
@@ -29,6 +29,7 @@ Commands:
 _WORLD_HELP = """\
 Commands (world open):
   status                       show world summary
+  save                         save the current world to disk
   planetology [help]           planetology commands
   geology [help]               geology commands
   topography [help]            topography commands
@@ -113,7 +114,7 @@ Simulation steps (run in this order by 'climate simulate'):
   temperature   compute surface temperature             [stub]
   evaporation   compute PET and AET                     [stub]
   koppen        classify Koppen climate zones           [stub]
-  herzfeld      classify Herzfeld climate zones         [stub]"""
+  hersfeldt      classify hersfeldt climate zones         [stub]"""
 
 _CLIMATE_SIMULATE_HELP = """\
 climate simulate [--iterations <n>]
@@ -154,7 +155,7 @@ _CLI_TO_STEP: dict[str, str] = {
     "temperature":   "temperature",
     "evaporation":   "evaporation",
     "koppen":        "koppen",
-    "herzfeld":      "herzfeld",
+    "hersfeldt":      "hersfeldt",
 }
 
 # Settable scalar fields per object.  Only objects whose History fields hold
@@ -297,6 +298,8 @@ class GeoSimREPL:
                 self._cmd_close()
             elif cmd == "status":
                 self._cmd_status()
+            elif cmd == "save":
+                self._cmd_save()
             elif cmd == "planetology":
                 self._cmd_object("planetology", Planetology, args, _PLANETOLOGY_HELP)
             elif cmd == "geology":
@@ -331,7 +334,6 @@ class GeoSimREPL:
             return
         config = WorldConfig()  # TODO: prompt for config options
         world = World(name=name, config=config)
-        store.save_world(world)
         self._world = world
         print(f"Created and opened world '{name}'.")
 
@@ -360,6 +362,13 @@ class GeoSimREPL:
             print("No world is currently open.")
             return
         print(self._world.status())
+
+    def _cmd_save(self) -> None:
+        if not self._world:
+            print("No world is currently open.")
+            return
+        store.save_world(self._world)
+        print(f"World '{self._world.name}' saved.")
 
     def _cmd_subobject(self, name: str) -> None:
         """Show status for a top-level object (used by _cmd_object and _cmd_topography)."""
@@ -391,7 +400,6 @@ class GeoSimREPL:
                 print(f"This world already has a {attr}.")
                 return
             setattr(self._world, attr, cls())
-            store.save_world(self._world)
             print(f"Created new {attr}.")
             return
 
@@ -444,7 +452,6 @@ class GeoSimREPL:
             print(f"Cannot set {attr}.{field}: {exc}")
             return
 
-        store.save_world(self._world)
         unit = field_units[field]
         suffix = f" {unit}" if unit else ""
         print(f"Set {attr}.{field} = {value}{suffix} at t={t:.4g} yr.")
@@ -467,7 +474,6 @@ class GeoSimREPL:
                 print("This world already has a topography.")
                 return
             self._world.topography = Topography()
-            store.save_world(self._world)
             print("Created new topography.")
             return
 
@@ -553,10 +559,9 @@ class GeoSimREPL:
         t = self._world.current_time
         tier.elevation.append(t, elevation)
 
-        store.save_world(self._world)
         print(
             f"Loaded elevation map: {elevation.shape[0]:,} pixels, "
-            f"range {elevation.min():.0f} – {elevation.max():.0f} m. World saved."
+            f"range {elevation.min():.0f} – {elevation.max():.0f} m."
         )
 
     def _cmd_topography_elevation_display(self, args: list[str]) -> None:
@@ -780,7 +785,6 @@ class GeoSimREPL:
                 return
 
             self._world.climate = Climate(n_seasons=n_seasons)
-            store.save_world(self._world)
             print(f"Created new climate (n_seasons={n_seasons}).")
             return
 
@@ -833,10 +837,9 @@ class GeoSimREPL:
 
         print(f"Computing {cli_name}...")
         run_step(self._world, step)
-        store.save_world(self._world)
 
         t = self._world.current_time
-        print(f"Saved to climate history at t={t:.4g} yr:")
+        print(f"Computed {cli_name} at t={t:.4g} yr:")
         for field in outputs:
             arr = getattr(self._world.climate, field).get(t)
             print(f"  {field}: shape={arr.shape}")
@@ -873,9 +876,8 @@ class GeoSimREPL:
 
         simulate_climate(world, n_iterations=iterations)
 
-        store.save_world(world)
         t = world.current_time
-        print(f"Climate simulation complete. Results stored at t={t:.4g} yr.")
+        print(f"Climate simulation complete. Results at t={t:.4g} yr.")
 
 
 

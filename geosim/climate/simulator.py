@@ -26,8 +26,8 @@ Step order and the Climate fields each step produces:
                   (produces climate.pet, climate.aet)
 10. koppen      - Find Koppen Climate zones from temperature, precipitation, etc
                   (produces a map for each Koppen zone - do not create yet)
-11. herzfeld    - Find Herzfeld climate zones from temperatures, PET, AET, etc
-                  (produces a map for each Herzfeld zone - do not create yet)
+11. hersfeldt    - Find hersfeldt climate zones from temperatures, PET, AET, etc
+                  (produces a map for each hersfeldt zone - do not create yet)
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ _STEP_OUTPUTS: dict[str, list[str]] = {
     "temperature":   ["temperature"],
     "evaporation":   ["pet", "aet"],
     "koppen":        [],
-    "herzfeld":      [],
+    "hersfeldt":      [],
 }
 
 # Canonical step order for simulate_climate.
@@ -86,7 +86,7 @@ _STEP_ORDER: list[str] = [
     "temperature",
     "evaporation",
     "koppen",
-    "herzfeld",
+    "hersfeldt",
 ]
 
 # ---------------------------------------------------------------------------
@@ -225,8 +225,8 @@ def _step_koppen(world: "World", state: ClimateState) -> None:
     pass
 
 
-def _step_herzfeld(world: "World", state: ClimateState) -> None:
-    # TODO: classify Herzfeld climate zones.
+def _step_hersfeldt(world: "World", state: ClimateState) -> None:
+    # TODO: classify hersfeldt climate zones.
     # Depends on: state["temperature"], state["pet"], state["aet"].
     # Output: (do not create Climate fields yet — classification maps TBD).
     pass
@@ -243,7 +243,7 @@ _STEP_FUNCTIONS = {
     "temperature":   _step_temperature,
     "evaporation":   _step_evaporation,
     "koppen":        _step_koppen,
-    "herzfeld":      _step_herzfeld,
+    "hersfeldt":      _step_hersfeldt,
 }
 
 
