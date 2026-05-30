@@ -79,7 +79,7 @@ Actions:
 Run 'topography elevation <action> --help' for full details on each action."""
 
 _TOPOGRAPHY_ELEVATION_LOAD_HELP = """\
-topography elevation load <file> [--min-elev <m>] [--max-elev <m>] [--max-pixels <n>]
+topography elevation load <file> [--estimate-sea-level] [--min-elev <m>] [--max-elev <m>] [--max-pixels <n>]
 
   Load an elevation map from a greyscale PNG file.
   The PNG must use an equirectangular (plate carrée) projection.
@@ -88,18 +88,20 @@ topography elevation load <file> [--min-elev <m>] [--max-elev <m>] [--max-pixels
     white (255) → --max-elev
 
 Arguments:
-  <file>             path to the input PNG (any resolution, any aspect ratio)
+  <file>                path to the input PNG (any resolution, any aspect ratio)
 
 Options:
-  --min-elev <m>     elevation value mapped to black  (default: -8000)
-  --max-elev <m>     elevation value mapped to white  (default:  8000)
-  --max-pixels <n>   if the PNG exceeds this pixel count it is scaled down
-                     proportionally before loading  (default: 100000000)
-                     pass 0 to disable the limit entirely
+  --estimate-sea-level  auto-detect min/max so the most common brightness maps
+                        to 0 m (sea level); ignores --min-elev and --max-elev
+  --min-elev <m>        elevation value mapped to black  (default: -8000)
+  --max-elev <m>        elevation value mapped to white  (default:  8000)
+  --max-pixels <n>      downsample if pixel count exceeds this  (default: 100000000)
+                        pass 0 to disable the limit entirely
 
-Example:
+Examples:
+  topography elevation load earth.png --estimate-sea-level
   topography elevation load earth.png --min-elev -11000 --max-elev 8850
-  topography elevation load big_map.png --max-pixels 50000000"""
+  topography elevation load big_map.png --estimate-sea-level --max-pixels 50000000"""
 
 _TOPOGRAPHY_ELEVATION_DISPLAY_HELP = """\
 topography elevation display [--time <t>] [--colormap <name>]
@@ -344,7 +346,7 @@ class GeoSimREPL:
         print(f"Unknown topography sub-command: '{args[0]}'. Type 'topography help' for usage.")
 
     def _cmd_topography_elevation_load(self, args: list[str]) -> None:
-        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y] [--max-pixels N]"""
+        """Handle: topography elevation load <file> [--min-elev X] [--max-elev Y] [--max-pixels N] [--estimate-sea-level]"""
         if not args or "--help" in args:
             print(_TOPOGRAPHY_ELEVATION_LOAD_HELP)
             return
@@ -355,10 +357,14 @@ class GeoSimREPL:
         min_elev = -8000.0
         max_elev = 8000.0
         max_pixels: int | None = 100_000_000
+        estimate_sea_level = False
         i = 0
         while i < len(remaining):
             flag = remaining[i]
-            if flag == "--min-elev" and i + 1 < len(remaining):
+            if flag == "--estimate-sea-level":
+                estimate_sea_level = True
+                i += 1
+            elif flag == "--min-elev" and i + 1 < len(remaining):
                 try:
                     min_elev = float(remaining[i + 1])
                 except ValueError:
@@ -384,13 +390,16 @@ class GeoSimREPL:
                 print(f"Unknown option: {flag!r}")
                 return
 
-        if min_elev >= max_elev:
+        if not estimate_sea_level and min_elev >= max_elev:
             print("--min-elev must be less than --max-elev.")
             return
 
         from geosim.topography.loader import load_elevation_png
 
-        print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
+        if estimate_sea_level:
+            print(f"Loading elevation from '{path}' (estimating sea level from mode)…")
+        else:
+            print(f"Loading elevation from '{path}' (min={min_elev} m, max={max_elev} m)…")
         try:
             elevation = load_elevation_png(
                 path,
@@ -399,6 +408,7 @@ class GeoSimREPL:
                 min_elev=min_elev,
                 max_elev=max_elev,
                 max_pixels=max_pixels,
+                estimate_sea_level=estimate_sea_level,
             )
         except FileNotFoundError:
             print(f"File not found: {path!r}")
