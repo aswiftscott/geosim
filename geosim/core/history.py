@@ -33,6 +33,25 @@ class History:
         self._times.append(t)
         self._values.append(value)
 
+    def set(self, t: float, value: Any) -> None:
+        """Record or overwrite a value at time t.
+
+        Like :meth:`append`, but if t equals the most recent timestamp the
+        existing entry is replaced rather than raising an error.  t must still
+        be greater than or equal to the latest recorded time — earlier times
+        cannot be altered.
+        """
+        if self._times and t < self._times[-1]:
+            raise ValueError(
+                f"Cannot set at t={t}: history already extends to t={self._times[-1]}. "
+                "Past entries are immutable."
+            )
+        if self._times and t == self._times[-1]:
+            self._values[-1] = value
+        else:
+            self._times.append(t)
+            self._values.append(value)
+
     def get(self, t: float) -> Any:
         """Return the most recent value recorded at or before time t."""
         if not self._times:

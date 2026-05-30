@@ -86,7 +86,7 @@ def _cmd_object_set(world: "World", attr: str, cls: type, args: list[str]) -> No
     h = getattr(obj, field)
     t = world.current_time
     try:
-        h.append(t, value)
+        h.set(t, value)
     except ValueError as exc:
         print(f"Cannot set {attr}.{field}: {exc}")
         return
