@@ -45,6 +45,10 @@ class Atmosphere:
     with the planetary radius and mass from Planetology, it determines
     surface pressure via ``compute_surface_pressure()``.
 
+    ``FIELDS`` is the authoritative list of settable scalar fields.  Each
+    entry is ``(attr_name, unit, description)`` and is consumed by
+    ``status()``, ``__repr__``, and the CLI ``set`` command.
+
     Earth reference values (approximate, modern):
         n2            0.7809
         o2            0.2095
@@ -55,6 +59,17 @@ class Atmosphere:
         so2           ~1e-9     (background; much higher after large eruptions)
         total_mass    5.15e18 kg
     """
+
+    FIELDS: list[tuple[str, str, str]] = [
+        ("n2",         "mol frac", "nitrogen"),
+        ("o2",         "mol frac", "oxygen"),
+        ("ar",         "mol frac", "argon"),
+        ("co2",        "mol frac", "carbon dioxide"),
+        ("ch4",        "mol frac", "methane"),
+        ("n2o",        "mol frac", "nitrous oxide"),
+        ("so2",        "mol frac", "sulfur dioxide"),
+        ("total_mass", "kg",       "total atmospheric mass"),
+    ]
 
     def __init__(self) -> None:
         # Bulk gases (by mole fraction)
@@ -79,26 +94,15 @@ class Atmosphere:
 
     def status(self) -> str:
         """Return a human-readable summary of all atmosphere fields."""
-        fields = [
-            ("n2",          "mol frac"),
-            ("o2",          "mol frac"),
-            ("ar",          "mol frac"),
-            ("co2",         "mol frac"),
-            ("ch4",         "mol frac"),
-            ("n2o",         "mol frac"),
-            ("so2",         "mol frac"),
-            ("total_mass",  "kg"),
-        ]
         lines = ["Atmosphere:"]
-        for name, unit in fields:
+        for name, unit, _ in self.FIELDS:
             h: History = getattr(self, name)
             suffix = f" {unit}" if unit and len(h) > 0 else ""
             lines.append(f"  {name:<14}{h.summary()}{suffix}")
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        gas_fields = ["n2", "o2", "ar", "co2", "ch4", "n2o", "so2", "total_mass"]
-        populated = [f for f in gas_fields if len(getattr(self, f)) > 0]
+        populated = [name for name, _, _ in self.FIELDS if len(getattr(self, name)) > 0]
         return f"Atmosphere(fields set: {populated})"
 
     # ------------------------------------------------------------------

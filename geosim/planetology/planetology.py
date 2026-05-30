@@ -11,7 +11,22 @@ class Planetology:
     can be tracked. Fields that never change will contain a single entry.
     Units are noted in comments; these are conventions only and are not
     enforced by the code.
+
+    ``FIELDS`` is the authoritative list of settable scalar fields.  Each
+    entry is ``(attr_name, unit, description)`` and is consumed by
+    ``status()``, ``__repr__``, and the CLI ``set`` command.
     """
+
+    FIELDS: list[tuple[str, str, str]] = [
+        ("radius",             "m",    "planetary radius"),
+        ("mass",               "kg",   "planetary mass"),
+        ("day_length",         "hr",   "length of one day"),
+        ("year_length",        "days", "length of one year"),
+        ("eccentricity",       "",     "orbital eccentricity"),
+        ("insolation",         "W/m²", "solar constant"),
+        ("axial_tilt",         "°",    "axial tilt"),
+        ("days_to_perihelion", "days", "days from NH winter solstice to perihelion"),
+    ]
 
     def __init__(self) -> None:
         self.radius: History = History()              # metres
@@ -26,29 +41,14 @@ class Planetology:
         # Further orbital / physical fields: TBD
 
     def status(self) -> str:
-        """Return a human-readable summary of all planetology fields.
-            days_to_perihelion is how many days after the northern hemisphere winter solstice perihelion occurs"""
-        fields = [
-            ("radius",           "m"),
-            ("mass",             "kg"),
-            ("day_length",       "hr"),
-            ("year_length",      "days"),
-            ("eccentricity",     ""),
-            ("insolation",       "W/m²"),
-            ("axial_tilt",       "°"),
-            ("days_to_perihelion",  "days"),
-        ]
+        """Return a human-readable summary of all planetology fields."""
         lines = ["Planetology:"]
-        for name, unit in fields:
+        for name, unit, _ in self.FIELDS:
             h: History = getattr(self, name)
             suffix = f" {unit}" if unit and len(h) > 0 else ""
             lines.append(f"  {name:<20}{h.summary()}{suffix}")
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        fields = [
-            "radius", "mass", "day_length", "year_length",
-            "eccentricity", "insolation", "axial_tilt", "days_to_perihelion",
-        ]
-        populated = [f for f in fields if len(getattr(self, f)) > 0]
+        populated = [name for name, _, _ in self.FIELDS if len(getattr(self, name)) > 0]
         return f"Planetology(fields set: {populated})"
